@@ -2,6 +2,10 @@ lockfileVersion: 5.4
 
 specifiers:
   mocha: ^10.0.0
+  typed-function: ^3.0.0
+
+dependencies:
+  typed-function: 3.0.0
 
 devDependencies:
   mocha: 10.0.0
@@ -464,6 +468,11 @@ packages:
     dependencies:
       is-number: 7.0.0
     dev: true
+
+  /typed-function/3.0.0:
+    resolution: {integrity: sha512-mKJKkt2xYxJUuMD7jyfgUxfn5KCsCxkEKBVjep5yYellJJ5aEDO2QUAmIGdvcZmfQnIrplkzELIaG+5b1475qg==}
+    engines: {node: '>= 14'}
+    dev: false
 
   /workerpool/6.2.1:
     resolution: {integrity: sha512-ILEIE97kDZvF9Wb9f6h5aXK4swSlKGUcOEGiIYb2OOu/IrDU9iwj0fD//SsA6E5ibwJxpEvhullJY4Sl4GcpAw==}
