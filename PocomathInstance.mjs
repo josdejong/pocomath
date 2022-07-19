@@ -5,6 +5,7 @@ export default class PocomathInstance {
    constructor(name) {
       this.name = name
       this._imps = {}
+      this._affects = {}
    }
     
    /**
@@ -41,11 +42,19 @@ export default class PocomathInstance {
       const opImps = this._imps[name]
       for (const signature in implementations) {
          if (signature in opImps) {
-            if (implemenatations[signature] === opImps[signature]) continue
+            if (implementations[signature] === opImps[signature]) continue
             throw new SyntaxError(
                `Conflicting definitions of ${signature} for ${name}`)
          } else {
             opImps[signature] = implementations[signature]
+            for (const dep of implementations[signature][0]) {
+               const depname = dep.split('(', 1)[0]
+               if (depname === 'self') continue
+               if (!(depname in this._affects)) {
+                  this._affects[depname] = new Set()
+               }
+               this._affects[depname].add(name)
+            }
          }
       }
    }
@@ -61,6 +70,11 @@ export default class PocomathInstance {
       }
       if (!(name in this._imps)) {
          this._imps[name] = {}
+      }
+      if (name in this._affects) {
+         for (const ancestor of this._affects[name]) {
+            this._invalidate(ancestor)
+         }
       }
    }
 
@@ -80,18 +94,26 @@ export default class PocomathInstance {
             tf_imps[signature] = imp
          } else {
             const refs = {}
+            let self_referential = false
             for (const dep of deps) {
-               // TODO: handle self dependencies
-               if (dep.slice(0,4) === 'self') {
-                  throw new Error('self-reference unimplemented')
-               }
                // TODO: handle signature-specific dependencies
                if (dep.includes('(')) {
                   throw new Error('signature specific reference unimplemented')
                }
-               refs[dep] = this._ensureBundle(dep) // just assume acyclic for now
+               if (dep === 'self') {
+                  self_referential = true
+               } else {
+                  refs[dep] = this._ensureBundle(dep) // assume acyclic for now
+               }
             }
-            tf_imps[signature] = imp(refs)
+            if (self_referential) {
+               tf_imps[signature] = typed.referToSelf(self => {
+                  refs.self = self
+                  return imp(refs)
+               })
+            } else {
+               tf_imps[signature] = imp(refs)
+            }
          }
       }
       const tf = typed(name, tf_imps)

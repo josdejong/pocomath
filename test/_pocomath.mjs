@@ -29,5 +29,27 @@ describe('The default full pocomath instance "math"', () => {
       assert.deepStrictEqual(math.complex(2,3), norm13)
       assert.deepStrictEqual(math.complex(2), math.complex(2,0))
       assert.deepStrictEqual(math.add(2, math.complex(0,3)), norm13)
+      assert.deepStrictEqual(
+         math.subtract(16, math.add(3, math.complex(0,4), 2)),
+         math.complex(11, -4))
+      assert.strictEqual(math.negate(math.complex(3, 8)).im, -8)
+   })
+
+   it('handles bigints', () => {
+      assert.strictEqual(math.negate(5n), -5n)
+      assert.strictEqual(math.subtract(12n, 5n), 7n)
+      assert.strictEqual(math.add(15n, 25n, 35n), 75n)
+      assert.strictEqual(math.add(10n, math.negate(3n)), 7n)
+   })
+
+   it('handles Gaussian integers', () => {
+      const norm13n = {re: 2n, im: 3n}
+      assert.deepStrictEqual(math.complex(2n,3n), norm13n)
+      assert.deepStrictEqual(math.complex(2n), math.complex(2n, 0n))
+      assert.deepStrictEqual(math.add(2n, math.complex(0n, 3n)), norm13n)
+      assert.deepStrictEqual(
+         math.subtract(16n, math.add(3n, math.complex(0n,4n), 2n)),
+         math.complex(11n, -4n))
+      assert.strictEqual(math.negate(math.complex(3n, 8n)).im, -8n)
    })
 })
