@@ -16,4 +16,18 @@ describe('The default full pocomath instance "math"', () => {
       assert.strictEqual(math.negate(-1), 1)
       assert.strictEqual(math.add(10, math.negate(3)), 7)
    })
+
+   it('can be extended', () => {
+      math.install({'add': {
+         '...string': [[], addends => addends.reduce((x,y) => x+y, '')]
+      }})
+      assert.strictEqual(math.add('Kilroy',' is here'), 'Kilroy is here')
+   })
+
+   it('handles complex numbers', () => {
+      const norm13 = {re: 2, im: 3}
+      assert.deepStrictEqual(math.complex(2,3), norm13)
+      assert.deepStrictEqual(math.complex(2), math.complex(2,0))
+      assert.deepStrictEqual(math.add(2, math.complex(0,3)), norm13)
+   })
 })
