@@ -74,17 +74,38 @@ export default class PocomathInstance {
          throw new SyntaxError(`No implementations for ${name}`)
       }
       const tf_imps = {}
-      // TODO: handle nonempty dependencies
       for (const signature in imps) {
          const [deps, imp] = imps[signature]
          if (deps.length === 0) {
             tf_imps[signature] = imp
          } else {
-            throw new Error('Unimplemented')
+            const refs = {}
+            for (const dep of deps) {
+               // TODO: handle self dependencies
+               if (dep.slice(0,4) === 'self') {
+                  throw new Error('self-reference unimplemented')
+               }
+               // TODO: handle signature-specific dependencies
+               if (dep.includes('(')) {
+                  throw new Error('signature specific reference unimplemented')
+               }
+               refs[dep] = this._ensureBundle(dep) // just assume acyclic for now
+            }
+            tf_imps[signature] = imp(refs)
          }
       }
       const tf = typed(name, tf_imps)
       this[name] = tf
       return tf
+   }
+
+   /**
+    * Ensure that the generated typed function is assigned to the given
+    * name and return it
+    */
+   _ensureBundle(name) {
+      const maybe = this[name]
+      if (typed.isTypedFunction(maybe)) return maybe
+      return this._bundle(name)
    }
 }
