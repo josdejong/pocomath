@@ -14,7 +14,7 @@ Note that 'subtract' is implemented as a 'generic' operation, that depends only 
 
 Furthermore, note that 'Complex' is implemented in a way that doesn't care about the types of the real and imaginary components, so with the 'bigint' type defined here as well, we obtain Gaussian integers for free.
 
-This core could be extended with many more operations, and more types could be defined, and additional sub-bundles like `number/all.mjs` or clever conditonal loaders like `complex/extendByComplex.mjs` could be defined.
+This core could be extended with many more operations, and more types could be defined, and additional sub-bundles like `number/all.mjs` or clever conditional loaders like `complex/extendToComplex.mjs` could be defined.
 
 Hopefully this shows promise. It is an evolution of the concept first prototyped in [picomath](https://code.studioinfinity.org/glen/picomath). However, picomath depended on typed-function allowing mutable function entities, which turned out not to be performant. Pocomath, on the other hand, uses typed-function v3 as it stands, although it does suggest that it would be helpful to extend typed-function with subtypes, and it could even be reasonable to move the dependency tracking into typed-function itself (given that typed-function already supports self-dependencies, it would not be difficult to extend that to inter-dependencies between different typed-functions).
 
