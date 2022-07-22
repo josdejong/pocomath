@@ -91,9 +91,10 @@ export default class PocomathInstance {
     */
    _invalidate(name) {
       const self = this
-      this[name] = function () {
-         return self._bundle(name).apply(self, arguments)
-      }
+      Object.defineProperty(this, name, {
+         configurable: true,
+         get: () => self._bundle(name)
+      })
       if (!(name in this._imps)) {
          this._imps[name] = {}
       }
@@ -130,7 +131,7 @@ export default class PocomathInstance {
                if (dep === 'self') {
                   self_referential = true
                } else {
-                  refs[dep] = this._ensureBundle(dep) // assume acyclic for now
+                  refs[dep] = this[dep] // assume acyclic for now
                }
             }
             if (self_referential) {
@@ -144,18 +145,8 @@ export default class PocomathInstance {
          }
       }
       const tf = this._typed(name, tf_imps)
-      this[name] = tf
+      Object.defineProperty(this, name, {configurable: true, value: tf})
       return tf
-   }
-
-   /**
-    * Ensure that the generated typed function is assigned to the given
-    * name and return it
-    */
-   _ensureBundle(name) {
-      const maybe = this[name]
-      if (this._typed.isTypedFunction(maybe)) return maybe
-      return this._bundle(name)
    }
 
    /**
