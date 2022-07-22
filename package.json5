@@ -5,7 +5,7 @@
     inclusion, avoiding factory functions.',
   main: 'index.js',
   scripts: {
-    test: 'npx mocha',
+    test: '!(find . | sort -f | uniq -i -c | grep -v " 1 ") && npx mocha',
   },
   repository: {
     type: 'git',
