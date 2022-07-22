@@ -1,4 +1,4 @@
-import {numComplex} from './Complex.mjs'
+import {numComplex} from './types/Complex.mjs'
 
 export const add = {
    '...Complex': [['self'], ref => addends => {

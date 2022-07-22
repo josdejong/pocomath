@@ -1,4 +1,4 @@
-import {numComplex} from './Complex.mjs'
+import {numComplex} from './types/Complex.mjs'
 export const negate = {
    Complex: [['self'], ref => z => {
       /* need a "base case" to avoid infinite self-reference */
