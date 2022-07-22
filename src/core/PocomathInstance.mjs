@@ -2,6 +2,12 @@
 import typed from 'typed-function'
 
 export default class PocomathInstance {
+   /* Disallowed names for ops; beware, this is slightly non-DRY
+    * in that if a new top-level PocomathInstance method is added, its name
+    * must be added to this list.
+    */
+   static reserved = new Set(['install'])
+
    constructor(name) {
       this.name = name
       this._imps = {}
@@ -48,6 +54,15 @@ export default class PocomathInstance {
 
    /* Used internally by install, see the documentation there */
    _installOp(name, implementations) {
+      if (name.charAt(0) === '_') {
+         throw new SyntaxError(
+            `Pocomath: Cannot install ${name}, `
+               + 'initial _ reserved for internal use.')
+      }
+      if (PocomathInstance.reserved.has(name)) {
+         throw new SyntaxError(
+            `Pocomath: the meaning of function '${name}' cannot be modified.`)
+      }
       // new implementations, so set the op up to lazily recreate itself
       this._invalidate(name)
       const opImps = this._imps[name]
