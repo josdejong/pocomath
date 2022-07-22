@@ -1,4 +1,4 @@
-import './types/Complex.mjs'
+export {Types} from './Types/Complex.mjs'
 
 export const complex = {
    /* Very permissive for sake of proof-of-concept; would be better to

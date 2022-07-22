@@ -5,7 +5,9 @@
     inclusion, avoiding factory functions.',
   main: 'index.js',
   scripts: {
-    test: '!(find . | sort -f | uniq -i -c | grep -v " 1 ") && npx mocha',
+    'test:filecase': '!(find . | sort -f | uniq -i -c | grep -v " 1 ")',
+    'test:unit': 'npx mocha --recursive',
+    test: 'pnpm test:filecase && pnpm test:unit',
   },
   repository: {
     type: 'git',

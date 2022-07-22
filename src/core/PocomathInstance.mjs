@@ -6,6 +6,10 @@ export default class PocomathInstance {
       this.name = name
       this._imps = {}
       this._affects = {}
+      this._typed = typed.create()
+      this._typed.clear()
+      // Convenient hack for now, would remove when a real string type is added:
+      this._typed.addTypes([{name: 'string', test: s => typeof s === 'string'}])
    }
     
    /**
@@ -29,7 +33,14 @@ export default class PocomathInstance {
     *    by the signature and returning the value. Otherwise, it should be
     *    a function taking an object with the dependency lists as keys and the
     *    requested functions as values, to a function taking the arguments
-    *    specified by the signature and returning the value
+    *    specified by the signature and returning the value.
+    *
+    *    Note that the "operation" named `Types` is special: it gives
+    *    types that must be installed in the instance. In this case, the keys
+    *    are type names, and the values are objects with a property 'test'
+    *    giving the predicate for the type, and properties for each type that can
+    *    be converted **to** this type, giving the corresponding conversion
+    *    function.
     */
    install(ops) {
       for (const key in ops) this._installOp(key, ops[key])
@@ -47,7 +58,7 @@ export default class PocomathInstance {
                `Conflicting definitions of ${signature} for ${name}`)
          } else {
             opImps[signature] = implementations[signature]
-            for (const dep of implementations[signature][0]) {
+            for (const dep of implementations[signature][0] || []) {
                const depname = dep.split('(', 1)[0]
                if (depname === 'self') continue
                if (!(depname in this._affects)) {
@@ -87,6 +98,7 @@ export default class PocomathInstance {
       if (!imps || Object.keys(imps).length === 0) {
          throw new SyntaxError(`No implementations for ${name}`)
       }
+      this._ensureTypes()
       const tf_imps = {}
       for (const signature in imps) {
          const [deps, imp] = imps[signature]
@@ -107,7 +119,7 @@ export default class PocomathInstance {
                }
             }
             if (self_referential) {
-               tf_imps[signature] = typed.referToSelf(self => {
+               tf_imps[signature] = this._typed.referToSelf(self => {
                   refs.self = self
                   return imp(refs)
                })
@@ -116,7 +128,7 @@ export default class PocomathInstance {
             }
          }
       }
-      const tf = typed(name, tf_imps)
+      const tf = this._typed(name, tf_imps)
       this[name] = tf
       return tf
    }
@@ -127,7 +139,40 @@ export default class PocomathInstance {
     */
    _ensureBundle(name) {
       const maybe = this[name]
-      if (typed.isTypedFunction(maybe)) return maybe
+      if (this._typed.isTypedFunction(maybe)) return maybe
       return this._bundle(name)
    }
+
+   /**
+    * Ensure that all of the requested types and conversions are actually
+    * in the typed-function universe:
+    */
+   _ensureTypes() {
+      const newTypes = []
+      const newTypeSet = new Set()
+      const knownTypeSet = new Set()
+      const conversions = []
+      const typeSpec = this._imps.Types
+      for (const name in this._imps.Types) {
+         knownTypeSet.add(name)
+         for (const from in typeSpec[name]) {
+            if (from === 'test') continue;
+            conversions.push(
+               {from, to: name, convert: typeSpec[name][from]})
+         }
+         try { // Hack: work around typed-function #154
+            this._typed._findType(name)
+         } catch {
+            newTypeSet.add(name)
+            newTypes.push({name, test: typeSpec[name].test})
+         }
+      }
+      this._typed.addTypes(newTypes)
+      const newConversions = conversions.filter(
+         item => (newTypeSet.has(item.from) || newTypeSet.has(item.to)) &&
+            knownTypeSet.has(item.from) && knownTypeSet.has(item.to)
+      )
+      this._typed.addConversions(newConversions)
+   }
+
 }

@@ -1,5 +1,5 @@
 /* Core of pocomath: generates the default instance */
-import PocomathInstance from './PocomathInstance.mjs'
+import PocomathInstance from './core/PocomathInstance.mjs'
 import * as numbers from './number/all.mjs'
 import * as bigints from './bigint/all.mjs'
 import * as complex from './complex/all.mjs'

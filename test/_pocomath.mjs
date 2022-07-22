@@ -1,5 +1,5 @@
 import assert from 'assert'
-import math from '../pocomath.mjs'
+import math from '../src/pocomath.mjs'
 
 describe('The default full pocomath instance "math"', () => {
    it('can subtract numbers', () => {

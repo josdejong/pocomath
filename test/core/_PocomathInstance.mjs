@@ -1,5 +1,5 @@
 import assert from 'assert'
-import PocomathInstance from '../PocomathInstance.mjs'
+import PocomathInstance from '../../src/core/PocomathInstance.mjs'
 
 describe('PocomathInstance', () => {
    it('creates an instance that can define typed-functions', () => {
