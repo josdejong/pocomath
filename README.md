@@ -16,6 +16,10 @@ Furthermore, note that 'Complex' is implemented in a way that doesn't care about
 
 This core could be extended with many more operations, and more types could be defined, and additional sub-bundles like `number/all.mjs` or clever conditional loaders like `complex/extendToComplex.mjs` could be defined.
 
+Also see the comments for the public member functions of
+`core/PocomathInstance.mjs` for further details on the structure and API of this
+scheme for organizing a CAS.
+
 Hopefully this shows promise. It is an evolution of the concept first prototyped in [picomath](https://code.studioinfinity.org/glen/picomath). However, picomath depended on typed-function allowing mutable function entities, which turned out not to be performant. Pocomath, on the other hand, uses typed-function v3 as it stands, although it does suggest that it would be helpful to extend typed-function with subtypes, and it could even be reasonable to move the dependency tracking into typed-function itself (given that typed-function already supports self-dependencies, it would not be difficult to extend that to inter-dependencies between different typed-functions).
 
 Note the conception of Pocomath includes allowing one implementation to depend just on a specific signature of another function, for efficiency's sake (if for example 'bar(Matrix)' knows it will only call 'foo(Matrix)', it avoids another type-dispatch). That capability did not actually come up in this toy example, so it remains unimplemented, but it should and could easily be added.

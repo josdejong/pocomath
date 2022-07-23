@@ -5,7 +5,7 @@ export const complex = {
     * have a numeric/scalar type, e.g. by implementing subtypes in
     * typed-function
     */
-   'any, any': [[], (x, y) => ({re: x, im: y})],
+   'any, any': {does: (x, y) => ({re: x, im: y})},
    /* Take advantage of conversions in typed-function */
-   Complex: [[], z => z]
+   Complex: {does: z => z}
 }
