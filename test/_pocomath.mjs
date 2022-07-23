@@ -19,7 +19,7 @@ describe('The default full pocomath instance "math"', () => {
 
    it('can be extended', () => {
       math.install({'add': {
-         '...string': [[], addends => addends.reduce((x,y) => x+y, '')]
+         '...string': () => addends => addends.reduce((x,y) => x+y, '')
       }})
       assert.strictEqual(math.add('Kilroy',' is here'), 'Kilroy is here')
    })

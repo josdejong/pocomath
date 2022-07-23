@@ -1,9 +1,6 @@
 /* Core of pocomath: create an instance */
 import typed from 'typed-function'
-
-export function use(dependencies, implementation) {
-   return [dependencies, implementation]
-}
+import dependencyExtractor from './dependencyExtractor.mjs'
 
 export default class PocomathInstance {
    /* Disallowed names for ops; beware, this is slightly non-DRY
@@ -25,50 +22,35 @@ export default class PocomathInstance {
    /**
     * (Partially) define one or more operations of the instance:
     *
-    * @param {Object<string, Object<Signature, [string[], function]>>} ops
+    * @param {Object<string, Object<Signature, ({deps})=> implementation>>} ops
     *    The only parameter ops gives the semantics of the operations to install.
     *    The keys are operation names. The value for a key is an object
-    *    mapping (typed-function) signature strings to specifications of
-    *    of dependency lists and implementation functions.
+    *    mapping each desired (typed-function) signature to a function taking
+    *    a dependency object to an implementation.
     *
-    *    A dependency list is a list of strings. Each string can either be the
-    *    name of a function that the corresponding implementation has to call,
-    *    or a specification of a particular signature of a function that it has
-    *    to call, in the form 'FN(SIGNATURE)' [not implemented yet].
-    *    Note the function name can be the special value 'self' to indicate a
-    *    recursive call to the given operation (either with or without a
-    *    particular signature.
+    *    For more detail, such functions should have the format
+    *    ```
+    *    ({depA, depB, depC: aliasC, ...}) => (opArg1, opArg2) => <result>
+    *    ```
+    *    where the `depA`, `depB` etc. are the names of the
+    *    operations this implementation depends on; those operations can
+    *    then be referred to directly by the identifiers `depA` and `depB`
+    *    in the code for the '<result>`, or when an alias has been given
+    *    as in the case of `depC`, by the identifier `aliasC`.
+    *    Given an object that has these dependencies with these keys, the
+    *    function returns a function taking the operation arguments to the
+    *    desired result of the operation.
     *
-    *    There are two cases for the implementation function. If the dependency
-    *    list is empty, it should be a function taking the arguments specified
-    *    by the signature and returning the value. Otherwise, it should be
-    *    a function taking an object with the dependency lists as keys and the
-    *    requested functions as values, to a function taking the arguments
-    *    specified by the signature and returning the value.
+    *    You can specify that an operation depends on itself by using the
+    *    special dependency identifier 'self'.
     *
-    *    There are various specifications currently allowed for the
-    *    dependency list and implementation function:
-    *
-    *    1) Just a function. Then the dependency list is assumed to be empty.
-    *
-    *    2) A pair (= Array with two entries) of a dependency list and the
-    *        implementation function.
-    *
-    *    3) An object whose property named 'does' gives the implementation
-    *        function and whose property named 'uses', if present, gives the
-    *        dependency list (which is assumed to be empty if the property is
-    *        not present).
-    *
-    *    4) A call to the 'use' function exported from the this module, with
-    *        first argument the dependencies and second argument the
-    *        implementation.
-    *
-    *    For a visual comparison of the options, this proof-of-concept uses
-    *    option (1) when possible for the 'number' type, (3) for the 'Complex'
-    *    type, (4) for the 'bigint' type, and (2) under any other circumstances.
-    *    Likely a fleshed-out version of this scheme would settle on just one
-    *    or two of these options or variants thereof, rather than providing so
-    *    many different ones.
+    *    You can specify that an implementation depends on just a specific
+    *    signature of the given operation by suffixing the dependency name
+    *    with the signature in parentheses, e.g. `add(number,number)` to
+    *    refer to just adding two numbers. In this case, it is of course
+    *    necessary to specify an alias to be able to refer to the supplied
+    *    operation in the body of the implementation. [NOTE: this signature-
+    *    specific reference is not yet implemented.]
     *
     *    Note that the "operation" named `Types` is special: it gives
     *    types that must be installed in the instance. In this case, the keys
@@ -94,13 +76,8 @@ export default class PocomathInstance {
          /* Grab all of the known deps */
          for (const func in this._imps) {
             if (func === 'Types') continue
-            for (const definition of Object.values(this._imps[func])) {
-               let deps = []
-               if (Array.isArray(definition)) deps = definition[0]
-               else if (typeof definition === 'object') {
-                  deps = definition.uses || deps
-               }
-               for (const dependency of deps) {
+            for (const {uses} of Object.values(this._imps[func])) {
+               for (const dependency of uses) {
                   const depName = dependency.split('(',1)[0]
                   if (doneSet.has(depName)) continue
                   requiredSet.add(depName)
@@ -137,14 +114,32 @@ export default class PocomathInstance {
       // new implementations, so set the op up to lazily recreate itself
       this._invalidate(name)
       const opImps = this._imps[name]
-      for (const signature in implementations) {
+      for (const [signature, does] of Object.entries(implementations)) {
+         if (name === 'Types') {
+            if (signature in opImps) {
+               if (does != opImps[signature]) {
+                  throw newSyntaxError(
+                     `Conflicting definitions of type ${signature}`)
+               }
+            } else {
+               opImps[signature] = does
+            }
+            continue
+         }
          if (signature in opImps) {
-            if (implementations[signature] === opImps[signature]) continue
-            throw new SyntaxError(
-               `Conflicting definitions of ${signature} for ${name}`)
+            if (does !== opImps[signature].does) {
+               throw new SyntaxError(
+                  `Conflicting definitions of ${signature} for ${name}`)
+            }
          } else {
-            opImps[signature] = implementations[signature]
-            for (const dep of implementations[signature][0] || []) {
+            if (name === 'Types') {
+               opImps[signature] = does
+               continue
+            }
+            const uses = new Set()
+            does(dependencyExtractor(uses))
+            opImps[signature] = {uses, does}
+            for (const dep of uses) {
                const depname = dep.split('(', 1)[0]
                if (depname === 'self') continue
                if (!(depname in this._affects)) {
@@ -187,27 +182,13 @@ export default class PocomathInstance {
       }
       this._ensureTypes()
       const tf_imps = {}
-      for (const signature in imps) {
-         const specifier = imps[signature]
-         let deps = []
-         let imp
-         if (typeof specifier === 'function') {
-            imp = specifier
-         } else if (Array.isArray(specifier)) {
-            [deps, imp] = specifier
-         } else if (typeof specifier === 'object') {
-            deps = specifier.uses || deps
-            imp = specifier.does
-         } else {
-            throw new SyntaxError(
-               `Cannot interpret signature definition ${specifier}`)
-         }
-         if (deps.length === 0) {
-            tf_imps[signature] = imp
+      for (const [signature, {uses, does}] of Object.entries(imps)) {
+         if (uses.length === 0) {
+            tf_imps[signature] = does()
          } else {
             const refs = {}
             let self_referential = false
-            for (const dep of deps) {
+            for (const dep of uses) {
                // TODO: handle signature-specific dependencies
                if (dep.includes('(')) {
                   throw new Error('signature specific reference unimplemented')
@@ -221,10 +202,10 @@ export default class PocomathInstance {
             if (self_referential) {
                tf_imps[signature] = this._typed.referToSelf(self => {
                   refs.self = self
-                  return imp(refs)
+                  return does(refs)
                })
             } else {
-               tf_imps[signature] = imp(refs)
+               tf_imps[signature] = does(refs)
             }
          }
       }
