@@ -6,7 +6,7 @@ export default class PocomathInstance {
     * in that if a new top-level PocomathInstance method is added, its name
     * must be added to this list.
     */
-   static reserved = new Set(['install'])
+   static reserved = new Set(['install', 'importDependencies'])
 
    constructor(name) {
       this.name = name
@@ -52,6 +52,43 @@ export default class PocomathInstance {
       for (const key in ops) this._installOp(key, ops[key])
    }
 
+   /**
+    * Import (and install) all dependencies of previously installed functions,
+    * for the specified types.
+    *
+    * @param {string[]} types  A list of type names
+    */
+   async importDependencies(types) {
+      const doneSet = new Set(['self']) // nothing to do for self dependencies
+      while (true) {
+         const requiredSet = new Set()
+         /* Grab all of the known deps */
+         for (const func in this._imps) {
+            if (func === 'Types') continue
+            for (const definition of Object.values(this._imps[func])) {
+               for (const dependency of definition[0]) {
+                  const depName = dependency.split('(',1)[0]
+                  if (doneSet.has(depName)) continue
+                  requiredSet.add(depName)
+               }
+            }
+         }
+         if (requiredSet.size === 0) break
+         for (const name of requiredSet) {
+            for (const type of types) {
+               try {
+                  const modName = `../${type}/${name}.mjs`
+                  const mod = await import(modName)
+                  this.install(mod)
+               } catch (err) {
+                  // No such module, but that's OK
+               }
+            }
+            doneSet.add(name)
+         }
+      }
+   }
+         
    /* Used internally by install, see the documentation there */
    _installOp(name, implementations) {
       if (name.charAt(0) === '_') {

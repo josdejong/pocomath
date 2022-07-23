@@ -6,6 +6,9 @@ import * as numberAdd from '../src/number/add.mjs'
 import * as complex from '../src/complex/all.mjs'
 import * as complexAdd from '../src/complex/add.mjs'
 import * as complexNegate from '../src/complex/negate.mjs'
+import * as complexComplex from '../src/complex/complex.mjs'
+import * as concreteSubtract from '../src/generic/subtract.concrete.mjs'
+import * as genericSubtract from '../src/generic/subtract.mjs'
 import extendToComplex from '../src/complex/extendToComplex.mjs'
 
 const bw = new PocomathInstance('backwards')
@@ -55,4 +58,24 @@ describe('A custom instance', () => {
       assert.strictEqual('subtract' in cherry, false)
       assert.strictEqual('negate' in cherry, false)
    })
+
+   it("can use bundles that are closed under dependency", () => {
+      const ok = new PocomathInstance('concrete')
+      ok.install(concreteSubtract)
+      assert.strictEqual(ok.subtract(7, 5), 2)
+   })
+
+   it("can load generics and then import their dependences", async function () {
+      const chase = new PocomathInstance('Chase Dependencies')
+      chase.install(genericSubtract)
+      chase.install(complexComplex) // for convenience to build complex numbers
+      await chase.importDependencies(['bigint', 'complex'])
+      /* Now we have an instance that supports subtraction for Gaussian
+         integers.
+      */
+      assert.deepStrictEqual(
+         chase.subtract(chase.complex(3n, 2n), chase.complex(2n, 5n)),
+         math.complex(1n, -3n))
+   })
+
 })
