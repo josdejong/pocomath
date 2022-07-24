@@ -1,7 +1,8 @@
 export const Types = {
     number: {
+        before: ['Complex'],
         test: n => typeof n === 'number',
-        string: s => +s
+        from: {string: s => +s}
     }
 }
 

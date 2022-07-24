@@ -1,3 +1,6 @@
 export const Types = {
-    bigint: {test: b => typeof b === 'bigint'}
+    bigint: {
+        before: ['Complex'],
+        test: b => typeof b === 'bigint'
+    }
 }

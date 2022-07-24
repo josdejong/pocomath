@@ -18,10 +18,18 @@ describe('The default full pocomath instance "math"', () => {
    })
 
    it('can be extended', () => {
-      math.install({'add': {
-         '...string': () => addends => addends.reduce((x,y) => x+y, '')
-      }})
-      assert.strictEqual(math.add('Kilroy',' is here'), 'Kilroy is here')
+      math.install({
+         add: {
+            '...stringK': () => addends => addends.reduce((x,y) => x+y, '')
+         },
+         Types: {
+            stringK: {
+               test: s => typeof s === 'string' && s.charAt(0) === 'K',
+               before: ['string']
+            }
+         }
+      })
+      assert.strictEqual(math.add('Kilroy','K is here'), 'KilroyK is here')
    })
 
    it('handles complex numbers', () => {

@@ -1,6 +1,7 @@
 /* Core of pocomath: create an instance */
 import typed from 'typed-function'
 import dependencyExtractor from './dependencyExtractor.mjs'
+import {subsetOfKeys, typesOfSignature} from './utils.mjs'
 
 export default class PocomathInstance {
    /* Disallowed names for ops; beware, this is slightly non-DRY
@@ -15,10 +16,9 @@ export default class PocomathInstance {
       this._affects = {}
       this._typed = typed.create()
       this._typed.clear()
-      // Convenient hack for now, would remove when a real string type is added:
-      this._typed.addTypes([{name: 'string', test: s => typeof s === 'string'}])
+      this.Types = {any: {}} // dummy entry to track the default 'any' type
    }
-    
+
    /**
     * (Partially) define one or more operations of the instance:
     *
@@ -54,13 +54,23 @@ export default class PocomathInstance {
     *
     *    Note that the "operation" named `Types` is special: it gives
     *    types that must be installed in the instance. In this case, the keys
-    *    are type names, and the values are objects with a property 'test'
-    *    giving the predicate for the type, and properties for each type that can
-    *    be converted **to** this type, giving the corresponding conversion
-    *    function.
+    *    are type names, and the values are plain objects with the following
+    *    properties:
+    *
+    *    - test: the predicate for the type
+    *    - from: a plain object mapping the names of types that can be converted
+    *        **to** this type to the corresponding conversion functions
+    *    - before: [optional] a list of types this should be added
+    *        before, in priority order
     */
    install(ops) {
-      for (const key in ops) this._installOp(key, ops[key])
+      for (const [item, spec] of Object.entries(ops)) {
+         if (item === 'Types') {
+            this._installTypes(spec)
+         } else {
+            this._installOp(item, spec)
+         }
+      }
    }
 
    /**
@@ -99,6 +109,45 @@ export default class PocomathInstance {
          }
       }
    }
+
+   /* Used internally by install, see the documentation there.
+    * Note that unlike _installOp below, we can do this immediately
+    */
+   _installTypes(typeSpecs) {
+      for (const [type, spec] of Object.entries(typeSpecs)) {
+         if (type in this.Types) {
+            if (spec !== this.Types[type]) {
+                  throw new SyntaxError(
+                     `Conflicting definitions of type ${type}`)
+            }
+            continue
+         }
+         let beforeType = 'any'
+         for (const other of spec.before || []) {
+            if (other in this.Types) {
+               beforeType = other
+               break
+            }
+         }
+         this._typed.addTypes([{name: type, test: spec.test}], beforeType)
+         /* Now add conversions to this type */
+         for (const from in (spec.from || {})) {
+            if (from in this.Types) {
+               this._typed.addConversion(
+                  {from, to: type, convert: spec.from[from]})
+            }
+         }
+         /* And add conversions from this type */
+         for (const to in this.Types) {
+            if (type in (this.Types[to].from || {})) {
+               this._typed.addConversion(
+                  {from: type, to, convert: this.Types[to].from[type]})
+            }
+         }
+         this.Types[type] = spec
+         this._invalidate(':' + type) // rebundle anything that uses the new type
+      }
+   }
          
    /* Used internally by install, see the documentation there */
    _installOp(name, implementations) {
@@ -115,39 +164,32 @@ export default class PocomathInstance {
       this._invalidate(name)
       const opImps = this._imps[name]
       for (const [signature, does] of Object.entries(implementations)) {
-         if (name === 'Types') {
-            if (signature in opImps) {
-               if (does != opImps[signature]) {
-                  throw newSyntaxError(
-                     `Conflicting definitions of type ${signature}`)
-               }
-            } else {
-               opImps[signature] = does
-            }
-            continue
-         }
          if (signature in opImps) {
             if (does !== opImps[signature].does) {
                throw new SyntaxError(
                   `Conflicting definitions of ${signature} for ${name}`)
             }
          } else {
-            if (name === 'Types') {
-               opImps[signature] = does
-               continue
-            }
             const uses = new Set()
             does(dependencyExtractor(uses))
             opImps[signature] = {uses, does}
             for (const dep of uses) {
                const depname = dep.split('(', 1)[0]
                if (depname === 'self') continue
-               if (!(depname in this._affects)) {
-                  this._affects[depname] = new Set()
-               }
-               this._affects[depname].add(name)
+               this._addAffect(depname, name)
+            }
+            for (const type of typesOfSignature(signature)) {
+               this._addAffect(':' + type, name)
             }
          }
+      }
+   }
+
+   _addAffect(dependency, dependent) {
+      if (dependency in this._affects) {
+         this._affects[dependency].add(dependent)
+      } else {
+         this._affects[dependency] = new Set([dependent])
       }
    }
 
@@ -177,12 +219,18 @@ export default class PocomathInstance {
     */
    _bundle(name) {
       const imps = this._imps[name]
-      if (!imps || Object.keys(imps).length === 0) {
+      if (!imps) {
          throw new SyntaxError(`No implementations for ${name}`)
       }
-      this._ensureTypes()
+      const usableEntries = Object.entries(imps).filter(
+         ([signature]) => subsetOfKeys(typesOfSignature(signature), this.Types))
+      if (usableEntries.length === 0) {
+         throw new SyntaxError(
+            `Every implementation for ${name} uses an undefined type;\n`
+               + `    signatures: ${Object.keys(imps)}`)
+      }
       const tf_imps = {}
-      for (const [signature, {uses, does}] of Object.entries(imps)) {
+      for (const [signature, {uses, does}] of usableEntries) {
          if (uses.length === 0) {
             tf_imps[signature] = does()
          } else {
@@ -212,38 +260,6 @@ export default class PocomathInstance {
       const tf = this._typed(name, tf_imps)
       Object.defineProperty(this, name, {configurable: true, value: tf})
       return tf
-   }
-
-   /**
-    * Ensure that all of the requested types and conversions are actually
-    * in the typed-function universe:
-    */
-   _ensureTypes() {
-      const newTypes = []
-      const newTypeSet = new Set()
-      const knownTypeSet = new Set()
-      const conversions = []
-      const typeSpec = this._imps.Types
-      for (const name in this._imps.Types) {
-         knownTypeSet.add(name)
-         for (const from in typeSpec[name]) {
-            if (from === 'test') continue;
-            conversions.push(
-               {from, to: name, convert: typeSpec[name][from]})
-         }
-         try { // Hack: work around typed-function #154
-            this._typed._findType(name)
-         } catch {
-            newTypeSet.add(name)
-            newTypes.push({name, test: typeSpec[name].test})
-         }
-      }
-      this._typed.addTypes(newTypes)
-      const newConversions = conversions.filter(
-         item => (newTypeSet.has(item.from) || newTypeSet.has(item.to)) &&
-            knownTypeSet.has(item.from) && knownTypeSet.has(item.to)
-      )
-      this._typed.addConversions(newConversions)
    }
 
 }

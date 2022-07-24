@@ -44,6 +44,23 @@ describe('A custom instance', () => {
          pm.subtract({re:5, im:0}, {re:10, im:1}), {re:-5, im: -1})
    })
 
+   it("can defer definition of (even used) types", () => {
+      const dt = new PocomathInstance('Deferred Types')
+      dt.install(numberAdd)
+      dt.install({times: {
+         'number,number': () => (m,n) => m*n,
+         'Complex,Complex': ({complex}) => (w,z) => {
+            return complex(w.re*z.re - w.im*z.im, w.re*z.im + w.im*z.re)
+         }
+      }})
+      // complex type not present but should still be able to add numbers:
+      assert.strictEqual(dt.times(3,5), 15)
+      dt.install(complexComplex)
+      // times should now rebundle to allow complex:
+      assert.deepStrictEqual(
+         dt.times(dt.complex(2,3), dt.complex(2,-3)), dt.complex(13))
+   })
+
    it("can selectively import in cute ways", async function () {
       const cherry = new PocomathInstance('cherry')
       cherry.install(numberAdd)
