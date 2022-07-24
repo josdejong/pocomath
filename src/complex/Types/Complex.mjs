@@ -9,8 +9,10 @@ export function isComplex(z) {
 export const Types = {
    Complex: {
       test: isComplex,
-      number: x => ({re: x, im: 0}),
-      bigint: x => ({re: x, im: 0n})
+      from: {
+         number: x => ({re: x, im: 0}),
+         bigint: x => ({re: x, im: 0n})
+      }
    }
 }
 
