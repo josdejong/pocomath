@@ -8,7 +8,7 @@ export default class PocomathInstance {
     * in that if a new top-level PocomathInstance method is added, its name
     * must be added to this list.
     */
-   static reserved = new Set(['install', 'importDependencies'])
+   static reserved = new Set(['config', 'importDependencies', 'install', 'name'])
 
    constructor(name) {
       this.name = name
@@ -17,6 +17,19 @@ export default class PocomathInstance {
       this._typed = typed.create()
       this._typed.clear()
       this.Types = {any: {}} // dummy entry to track the default 'any' type
+      this._doomed = new Set() // for detecting circular reference
+      this._config = {predictable: false}
+      const self = this
+      this.config = new Proxy(this._config, {
+         get: (target, property) => target[property],
+         set: (target, property, value) => {
+            if (value !== target[property]) {
+               target[property] = value
+               self._invalidateDependents('config')
+            }
+            return true // successful
+         }
+      })
    }
 
    /**
@@ -80,6 +93,8 @@ export default class PocomathInstance {
     * @param {string[]} types  A list of type names
     */
    async importDependencies(types) {
+      const typeSet = new Set(types)
+      typeSet.add('generic')
       const doneSet = new Set(['self']) // nothing to do for self dependencies
       while (true) {
          const requiredSet = new Set()
@@ -96,7 +111,7 @@ export default class PocomathInstance {
          }
          if (requiredSet.size === 0) break
          for (const name of requiredSet) {
-            for (const type of types) {
+            for (const type of typeSet) {
                try {
                   const modName = `../${type}/${name}.mjs`
                   const mod = await import(modName)
@@ -145,7 +160,8 @@ export default class PocomathInstance {
             }
          }
          this.Types[type] = spec
-         this._invalidate(':' + type) // rebundle anything that uses the new type
+         // rebundle anything that uses the new type:
+         this._invalidateDependents(':' + type)
       }
    }
          
@@ -198,14 +214,27 @@ export default class PocomathInstance {
     * and if it has no implementations so far, set them up.
     */
    _invalidate(name) {
+      if (this._doomed.has(name)) {
+         /* In the midst of a circular invalidation, so do nothing */
+         return
+      }
+      if (!(name in this._imps)) {
+         this._imps[name] = {}
+      }
+      this._doomed.add(name)
+      this._invalidateDependents(name)
+      this._doomed.delete(name)
       const self = this
       Object.defineProperty(this, name, {
          configurable: true,
          get: () => self._bundle(name)
       })
-      if (!(name in this._imps)) {
-         this._imps[name] = {}
-      }
+   }
+
+   /**
+    * Invalidate all the dependents of a given property of the instance
+    */
+   _invalidateDependents(name) {
       if (name in this._affects) {
          for (const ancestor of this._affects[name]) {
             this._invalidate(ancestor)
@@ -229,29 +258,69 @@ export default class PocomathInstance {
             `Every implementation for ${name} uses an undefined type;\n`
                + `    signatures: ${Object.keys(imps)}`)
       }
+      Object.defineProperty(this, name, {configurable: true, value: 'limbo'})
       const tf_imps = {}
       for (const [signature, {uses, does}] of usableEntries) {
          if (uses.length === 0) {
             tf_imps[signature] = does()
          } else {
             const refs = {}
-            let self_referential = false
+            let full_self_referential = false
+            let part_self_references = []
             for (const dep of uses) {
-               // TODO: handle signature-specific dependencies
-               if (dep.includes('(')) {
-                  throw new Error('signature specific reference unimplemented')
-               }
-               if (dep === 'self') {
-                  self_referential = true
+               const [func, needsig] = dep.split(/[()]/)
+               if (func === 'self') {
+                  if (needsig) {
+                     if (full_self_referential) {
+                        throw new SyntaxError(
+                           'typed-function does not support mixed full and '
+                              + 'partial self-reference')
+                     }
+                     if (subsetOfKeys(typesOfSignature(needsig), this.Types)) {
+                        part_self_references.push(needsig)
+                     }
+                  } else {
+                     if (part_self_references.length) {
+                        throw new SyntaxError(
+                           'typed-function does not support mixed full and '
+                              + 'partial self-reference')
+                     }
+                     full_self_referential = true
+                  }
                } else {
-                  refs[dep] = this[dep] // assume acyclic for now
+                  if (this[func] === 'limbo') {
+                     /* We are in the midst of bundling func, so have to use
+                      * an indirect reference to func. And given that, there's
+                      * really no helpful way to extract a specific signature
+                      */
+                     const self = this
+                     refs[dep] = function () { // is this the most efficient?
+                        return self[func].apply(this, arguments)
+                     }
+                  } else {
+                     // can bundle up func, and grab its signature if need be
+                     let destination = this[func]
+                     if (needsig) {
+                        destination = this._typed.find(destination, needsig)
+                     }
+                     refs[dep] = destination
+                  }
                }
             }
-            if (self_referential) {
+            if (full_self_referential) {
                tf_imps[signature] = this._typed.referToSelf(self => {
                   refs.self = self
                   return does(refs)
                })
+            } else if (part_self_references.length) {
+               tf_imps[signature] = this._typed.referTo(
+                  ...part_self_references, (...impls) => {
+                     for (let i = 0; i < part_self_references.length; ++i) {
+                        refs[`self(${part_self_references[i]})`] = impls[i]
+                     }
+                     return does(refs)
+                  }
+               )
             } else {
                tf_imps[signature] = does(refs)
             }
