@@ -10,7 +10,7 @@ Multiple different instances can coexist and have different collections of opera
 
 Hopefully the test cases, especially `test/_pocomath.mjs` and `test/custom.js`, will show off these aspects in action.
 
-Note that 'subtract' is implemented as a 'generic' operation, that depends only on the 'add' and 'negate' operations (and so doesn't care what types it is operating on).
+Note that 'subtract' is implemented as a 'generic' operation, that depends only on the 'add' and 'negate' operations (and so doesn't care what types it is operating on). Although it would not be the computationally fastest in a production instance, for the sake of demonstration 'divide' and 'sign' are also so defined.
 
 Furthermore, note that 'Complex' is implemented in a way that doesn't care about the types of the real and imaginary components, so with the 'bigint' type defined here as well, we obtain Gaussian integers for free.
 
@@ -22,4 +22,6 @@ scheme for organizing a CAS.
 
 Hopefully this shows promise. It is an evolution of the concept first prototyped in [picomath](https://code.studioinfinity.org/glen/picomath). However, picomath depended on typed-function allowing mutable function entities, which turned out not to be performant. Pocomath, on the other hand, uses typed-function v3 as it stands, although it does suggest that it would be helpful to extend typed-function with subtypes, and it could even be reasonable to move the dependency tracking into typed-function itself (given that typed-function already supports self-dependencies, it would not be difficult to extend that to inter-dependencies between different typed-functions).
 
-Note the conception of Pocomath includes allowing one implementation to depend just on a specific signature of another function, for efficiency's sake (if for example 'bar(Matrix)' knows it will only call 'foo(Matrix)', it avoids another type-dispatch). That capability did not actually come up in this toy example, so it remains unimplemented, but it should and could easily be added.
+Note that Pocomath allows one implementation to depend just on a specific signature of another function, for efficiency's sake (if for example 'bar(Matrix)' knows it will only call 'foo(Matrix)', it avoids another type-dispatch). That capability is used in sqrt, for example.
+
+Pocomath also lazily reloads operations that depend on the config when that changes, and if an operation has a signature mentioning an undefined type, that signature is ignored until the type is installed, at which point the function lazily redefines itself to use the additional signature.
