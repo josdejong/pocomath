@@ -8,7 +8,8 @@ export default class PocomathInstance {
     * in that if a new top-level PocomathInstance method is added, its name
     * must be added to this list.
     */
-   static reserved = new Set(['config', 'importDependencies', 'install', 'name'])
+   static reserved = new Set([
+      'config', 'importDependencies', 'install', 'name', 'Types'])
 
    constructor(name) {
       this.name = name
@@ -65,10 +66,11 @@ export default class PocomathInstance {
     *    operation in the body of the implementation. [NOTE: this signature-
     *    specific reference is not yet implemented.]
     *
-    *    Note that the "operation" named `Types` is special: it gives
-    *    types that must be installed in the instance. In this case, the keys
-    *    are type names, and the values are plain objects with the following
-    *    properties:
+    *    Note that any "operation" whose name begins with  `Type_` is special:
+    *    it defines a types that must be installed in the instance.
+    *    The remainder of the "operation" name following the `_` is the
+    *    name of the type. The value of the "operation" should be a plain
+    *    object with the following properties:
     *
     *    - test: the predicate for the type
     *    - from: a plain object mapping the names of types that can be converted
@@ -78,8 +80,8 @@ export default class PocomathInstance {
     */
    install(ops) {
       for (const [item, spec] of Object.entries(ops)) {
-         if (item === 'Types') {
-            this._installTypes(spec)
+         if (item.slice(0,5) === 'Type_') {
+            this._installType(item.slice(5), spec)
          } else {
             this._installOp(item, spec)
          }
@@ -128,43 +130,40 @@ export default class PocomathInstance {
    /* Used internally by install, see the documentation there.
     * Note that unlike _installOp below, we can do this immediately
     */
-   _installTypes(typeSpecs) {
-      for (const [type, spec] of Object.entries(typeSpecs)) {
-         if (type in this.Types) {
-            if (spec !== this.Types[type]) {
-                  throw new SyntaxError(
-                     `Conflicting definitions of type ${type}`)
-            }
-            continue
+   _installType(type, spec) {
+      if (type in this.Types) {
+         if (spec !== this.Types[type]) {
+            throw new SyntaxError(`Conflicting definitions of type ${type}`)
          }
-         let beforeType = 'any'
-         for (const other of spec.before || []) {
-            if (other in this.Types) {
-               beforeType = other
-               break
-            }
-         }
-         this._typed.addTypes([{name: type, test: spec.test}], beforeType)
-         /* Now add conversions to this type */
-         for (const from in (spec.from || {})) {
-            if (from in this.Types) {
-               this._typed.addConversion(
-                  {from, to: type, convert: spec.from[from]})
-            }
-         }
-         /* And add conversions from this type */
-         for (const to in this.Types) {
-            if (type in (this.Types[to].from || {})) {
-               this._typed.addConversion(
-                  {from: type, to, convert: this.Types[to].from[type]})
-            }
-         }
-         this.Types[type] = spec
-         // rebundle anything that uses the new type:
-         this._invalidateDependents(':' + type)
+         return
       }
+      let beforeType = 'any'
+      for (const other of spec.before || []) {
+         if (other in this.Types) {
+            beforeType = other
+            break
+         }
+      }
+      this._typed.addTypes([{name: type, test: spec.test}], beforeType)
+      /* Now add conversions to this type */
+      for (const from in (spec.from || {})) {
+         if (from in this.Types) {
+            this._typed.addConversion(
+               {from, to: type, convert: spec.from[from]})
+         }
+      }
+      /* And add conversions from this type */
+      for (const to in this.Types) {
+         if (type in (this.Types[to].from || {})) {
+            this._typed.addConversion(
+               {from: type, to, convert: this.Types[to].from[type]})
+         }
+      }
+      this.Types[type] = spec
+      // rebundle anything that uses the new type:
+      this._invalidateDependents(':' + type)
    }
-         
+
    /* Used internally by install, see the documentation there */
    _installOp(name, implementations) {
       if (name.charAt(0) === '_') {

@@ -22,11 +22,9 @@ describe('The default full pocomath instance "math"', () => {
          add: {
             '...stringK': () => addends => addends.reduce((x,y) => x+y, '')
          },
-         Types: {
-            stringK: {
-               test: s => typeof s === 'string' && s.charAt(0) === 'K',
-               before: ['string']
-            }
+         Type_stringK: {
+            test: s => typeof s === 'string' && s.charAt(0) === 'K',
+            before: ['string']
          }
       })
       assert.strictEqual(math.add('Kilroy','K is here'), 'KilroyK is here')

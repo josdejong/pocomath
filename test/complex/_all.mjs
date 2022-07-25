@@ -9,6 +9,9 @@ describe('complex', () => {
       assert.deepStrictEqual(
          math.sqrt(math.complex(0,1)),
          math.complex(math.sqrt(0.5), math.sqrt(0.5)))
+      assert.deepStrictEqual(
+         math.sqrt(math.complex(5, 12)),
+         math.complex(3, 2))
       math.config.predictable = true
       assert.deepStrictEqual(math.sqrt(math.complex(1,0)), math.complex(1,0))
       assert.deepStrictEqual(

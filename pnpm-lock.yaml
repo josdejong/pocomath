@@ -1,10 +1,12 @@
 lockfileVersion: 5.4
 
 specifiers:
+  bigint-isqrt: ^0.2.1
   mocha: ^10.0.0
   typed-function: ^3.0.0
 
 dependencies:
+  bigint-isqrt: 0.2.1
   typed-function: 3.0.0
 
 devDependencies:
@@ -48,6 +50,10 @@ packages:
   /balanced-match/1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
     dev: true
+
+  /bigint-isqrt/0.2.1:
+    resolution: {integrity: sha512-x43s2Qx5l5ShFZFA5xejJfPtV1vXISyWUXlrZeJTx9F6D2ex3BR6AwWnIz4ITAu5nTy3hp+d+ClGu7qUGcgY8g==}
+    dev: false
 
   /binary-extensions/2.2.0:
     resolution: {integrity: sha512-jDctJ/IVQbZoJykoeHbhXpOlNBqGNcwXJKJog42E5HDPUwQTSdjCHdihjj0DlnheQ7blbT6dHOafNAiS8ooQKA==}
