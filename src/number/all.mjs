@@ -1,4 +1,4 @@
 export {Types} from './Types/number.mjs'
-export {add} from './add.mjs'
-export {negate} from './negate.mjs'
-export {subtract} from '../generic/subtract.mjs'
+
+export * from './native.mjs'
+export * from '../generic/arithmetic.mjs'
