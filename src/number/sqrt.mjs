@@ -1,4 +1,4 @@
-export { Types } from './Types/number.mjs'
+export * from './Types/number.mjs'
 
 export const sqrt = {
    number: ({config, complex, 'self(Complex)': complexSqrt}) => {

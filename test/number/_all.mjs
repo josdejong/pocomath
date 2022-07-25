@@ -4,6 +4,7 @@ import PocomathInstance from '../../src/core/PocomathInstance.mjs'
 import * as numberSqrt from '../../src/number/sqrt.mjs'
 import * as complex from '../../src/complex/all.mjs'
 import * as numbers from '../../src/number/all.mjs'
+
 describe('number', () => {
    it('supports sqrt', () => {
       assert.strictEqual(math.sqrt(4), 2)

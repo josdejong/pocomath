@@ -1,4 +1,4 @@
-export {Types} from './Types/Complex.mjs'
+export * from './Types/Complex.mjs'
 
 export {abs} from './abs.mjs'
 export {add} from './add.mjs'

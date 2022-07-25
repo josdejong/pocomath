@@ -1,4 +1,4 @@
-export {Types} from './Types/Complex.mjs'
+export * from './Types/Complex.mjs'
 
 export const add = {
    '...Complex': ({self}) => addends => {

@@ -1,8 +1,7 @@
 {
   name: 'pocomath',
   version: '0.0.0',
-  description: 'A little proof-of-concept for organizing mathjs by module\
-    inclusion, avoiding factory functions.',
+  description: 'A little proof-of-concept for organizing mathjs by module    inclusion, avoiding factory functions.',
   main: 'index.js',
   scripts: {
     'test:filecase': '!(find . | sort -f | uniq -i -c | grep -v " 1 ")',
@@ -24,6 +23,7 @@
     mocha: '^10.0.0',
   },
   dependencies: {
+    'bigint-isqrt': '^0.2.1',
     'typed-function': '^3.0.0',
   },
 }
