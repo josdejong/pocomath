@@ -3,13 +3,20 @@ import typed from 'typed-function'
 import dependencyExtractor from './dependencyExtractor.mjs'
 import {subsetOfKeys, typesOfSignature} from './utils.mjs'
 
+const anySpec = {} // fixed dummy specification of 'any' type
+
 export default class PocomathInstance {
    /* Disallowed names for ops; beware, this is slightly non-DRY
     * in that if a new top-level PocomathInstance method is added, its name
     * must be added to this list.
     */
    static reserved = new Set([
-      'config', 'importDependencies', 'install', 'name', 'Types'])
+      'config',
+      'importDependencies',
+      'install',
+      'installType',
+      'name',
+      'Types'])
 
    constructor(name) {
       this.name = name
@@ -17,7 +24,7 @@ export default class PocomathInstance {
       this._affects = {}
       this._typed = typed.create()
       this._typed.clear()
-      this.Types = {any: {}} // dummy entry to track the default 'any' type
+      this.Types = {any: anySpec} // dummy entry to track the default 'any' type
       this._doomed = new Set() // for detecting circular reference
       this._config = {predictable: false}
       const self = this
@@ -36,9 +43,19 @@ export default class PocomathInstance {
    /**
     * (Partially) define one or more operations of the instance:
     *
-    * @param {Object<string, Object<Signature, ({deps})=> implementation>>} ops
+    * The sole parameter can be another Pocomath instance, in which case all
+    * of the types and operations of the other instance are installed in this
+    * one, or it can be a plain object as described below.
+    *
+    * @param {Object<string,
+    *                PocomathInstance
+    *                | Object<Signature, ({deps})=> implementation>>} ops
     *    The only parameter ops gives the semantics of the operations to install.
-    *    The keys are operation names. The value for a key is an object
+    *    The keys are operation names. The value for a key could be
+    *    a PocomathInstance, in which case it is simply merged into this
+    *    instance.
+    *
+    *    Otherwise, ops must be an object
     *    mapping each desired (typed-function) signature to a function taking
     *    a dependency object to an implementation.
     *
@@ -63,29 +80,55 @@ export default class PocomathInstance {
     *    with the signature in parentheses, e.g. `add(number,number)` to
     *    refer to just adding two numbers. In this case, it is of course
     *    necessary to specify an alias to be able to refer to the supplied
-    *    operation in the body of the implementation. [NOTE: this signature-
-    *    specific reference is not yet implemented.]
-    *
-    *    Note that any "operation" whose name begins with  `Type_` is special:
-    *    it defines a types that must be installed in the instance.
-    *    The remainder of the "operation" name following the `_` is the
-    *    name of the type. The value of the "operation" should be a plain
-    *    object with the following properties:
-    *
-    *    - test: the predicate for the type
-    *    - from: a plain object mapping the names of types that can be converted
-    *        **to** this type to the corresponding conversion functions
-    *    - before: [optional] a list of types this should be added
-    *        before, in priority order
+    *    operation in the body of the implementation.
     */
    install(ops) {
+      if (ops instanceof PocomathInstance) {
+         return _installInstance(ops)
+      }
+      /* Standardize the format of all implementations, weeding out
+       * any other instances as we go
+       */
+      const stdFunctions = {}
       for (const [item, spec] of Object.entries(ops)) {
-         if (item.slice(0,5) === 'Type_') {
-            this._installType(item.slice(5), spec)
+         if (spec instanceof PocomathInstance) {
+            this._installInstance(spec)
          } else {
-            this._installOp(item, spec)
+            if (item.charAt(0) === '_') {
+               throw new SyntaxError(
+                  `Pocomath: Cannot install ${item}, `
+                     + 'initial _ reserved for internal use.')
+            }
+            if (PocomathInstance.reserved.has(item)) {
+               throw new SyntaxError(
+                  `Pocomath: reserved function '${item}' cannot be modified.`)
+            }
+            const stdimps = {}
+            for (const [signature, does] of Object.entries(spec)) {
+               const uses = new Set()
+               does(dependencyExtractor(uses))
+               stdimps[signature] = {uses, does}
+            }
+            stdFunctions[item] = stdimps
          }
       }
+      this._installFunctions(stdFunctions)
+   }
+
+   /* Merge any number of PocomathInstances or modules:  */
+   static merge(name, ...pieces) {
+      const result = new PocomathInstance(name)
+      for (const piece of pieces) {
+         result.install(piece)
+      }
+      return result
+   }
+
+   _installInstance(other) {
+      for (const [type, spec] of Object.entries(other.Types)) {
+         this.installType(type, spec)
+      }
+      this._installFunctions(other._imps)
    }
 
    /**
@@ -127,10 +170,29 @@ export default class PocomathInstance {
       }
    }
 
-   /* Used internally by install, see the documentation there.
-    * Note that unlike _installOp below, we can do this immediately
+   /* Used to install a type in a PocomathInstance.
+    *
+    * @param {string} name  The name of the type
+    * @param {{test: any => bool,  // the predicate for the type
+    *          from: Record<string, <that type> => <type name>> // conversions
+    *          before: string[]  // lower priority types
+    *        }} specification
+    *
+    * The second parameter of this function specifies the structure of the
+    * type via a plain
+    *    object with the following properties:
+    *
+    *    - test: the predicate for the type
+    *    - from: a plain object mapping the names of types that can be converted
+    *        **to** this type to the corresponding conversion functions
+    *    - before: [optional] a list of types this should be added
+    *        before, in priority order
     */
-   _installType(type, spec) {
+   /*
+    * Implementation note: unlike _installFunctions below, we can make
+    * the corresponding changes to the _typed object immediately
+    */
+   installType(type, spec) {
       if (type in this.Types) {
          if (spec !== this.Types[type]) {
             throw new SyntaxError(`Conflicting definitions of type ${type}`)
@@ -165,36 +227,27 @@ export default class PocomathInstance {
    }
 
    /* Used internally by install, see the documentation there */
-   _installOp(name, implementations) {
-      if (name.charAt(0) === '_') {
-         throw new SyntaxError(
-            `Pocomath: Cannot install ${name}, `
-               + 'initial _ reserved for internal use.')
-      }
-      if (PocomathInstance.reserved.has(name)) {
-         throw new SyntaxError(
-            `Pocomath: the meaning of function '${name}' cannot be modified.`)
-      }
-      // new implementations, so set the op up to lazily recreate itself
-      this._invalidate(name)
-      const opImps = this._imps[name]
-      for (const [signature, does] of Object.entries(implementations)) {
-         if (signature in opImps) {
-            if (does !== opImps[signature].does) {
-               throw new SyntaxError(
-                  `Conflicting definitions of ${signature} for ${name}`)
-            }
-         } else {
-            const uses = new Set()
-            does(dependencyExtractor(uses))
-            opImps[signature] = {uses, does}
-            for (const dep of uses) {
-               const depname = dep.split('(', 1)[0]
-               if (depname === 'self') continue
-               this._addAffect(depname, name)
-            }
-            for (const type of typesOfSignature(signature)) {
-               this._addAffect(':' + type, name)
+   _installFunctions(functions) {
+      for (const [name, spec] of Object.entries(functions)) {
+         // new implementations, so set the op up to lazily recreate itself
+         this._invalidate(name)
+         const opImps = this._imps[name]
+         for (const [signature, behavior] of Object.entries(spec)) {
+            if (signature in opImps) {
+               if (behavior.does !== opImps[signature].does) {
+                  throw new SyntaxError(
+                     `Conflicting definitions of ${signature} for ${name}`)
+               }
+            } else {
+               opImps[signature] = behavior
+               for (const dep of behavior.uses) {
+                  const depname = dep.split('(', 1)[0]
+                  if (depname === 'self') continue
+                  this._addAffect(depname, name)
+               }
+               for (const type of typesOfSignature(signature)) {
+                  this._addAffect(':' + type, name)
+               }
             }
          }
       }

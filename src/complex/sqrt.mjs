@@ -35,7 +35,6 @@ export const sqrt = {
          const reSign = sign(z.re)
          if (imSign === imZero && reSign === reOne) return self(z.re)
          const reTwo = add(reOne, reOne)
-         const partial = add(abs(z), z.re)
          return complex(
             multiply(sign(z.im), self(divide(add(abs(z),z.re), reTwo))),
             self(divide(subtract(abs(z),z.re), reTwo))

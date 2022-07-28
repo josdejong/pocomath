@@ -1,8 +1,5 @@
-export * from './native.mjs'
-export * from '../generic/arithmetic.mjs'
+import PocomathInstance from '../core/PocomathInstance.mjs'
+import * as bigints from './native.mjs'
+import * as generic from '../generic/arithmetic.mjs'
 
-// resolve the conflicts
-export {divide} from './divide.mjs'
-export {multiply} from './multiply.mjs'
-export {sign} from './sign.mjs'
-export {sqrt} from './sqrt.mjs'
+export default PocomathInstance.merge('bigint', bigints, generic)
