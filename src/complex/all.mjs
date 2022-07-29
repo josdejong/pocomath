@@ -1,5 +1,5 @@
-export * from '../generic/arithmetic.mjs'
-export * from './native.mjs'
+import PocomathInstance from '../core/PocomathInstance.mjs'
+import * as complexes from './native.mjs'
+import * as generic from '../generic/arithmetic.mjs'
 
-// resolve the conflicts
-export {sqrt} from './sqrt.mjs'
+export default PocomathInstance.merge('complex', complexes, generic)

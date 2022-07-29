@@ -5,10 +5,6 @@ import * as bigints from './bigint/native.mjs'
 import * as complex from './complex/native.mjs'
 import * as generic from './generic/all.mjs'
 
-const math = new PocomathInstance('math')
-math.install(numbers)
-math.install(bigints)
-math.install(complex)
-math.install(generic)
+const math = PocomathInstance.merge('math', numbers, bigints, complex, generic)
 
 export default math

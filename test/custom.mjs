@@ -23,7 +23,7 @@ describe('A custom instance', () => {
 
    it("can be assembled in any order", () => {
       bw.install(numbers)
-      bw.install({Type_string: {test: s => typeof s === 'string'}})
+      bw.installType('string', {test: s => typeof s === 'string'})
       assert.strictEqual(bw.subtract(16, bw.add(3,4,2)), 7)
       assert.strictEqual(bw.negate('8'), -8)
       assert.deepStrictEqual(bw.add(bw.complex(1,3), 1), {re: 2, im: 3})

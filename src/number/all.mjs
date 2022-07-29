@@ -1,6 +1,6 @@
-export * from '../generic/arithmetic.mjs'
-export * from './native.mjs'
+import PocomathInstance from '../core/PocomathInstance.mjs'
+import * as numbers from './native.mjs'
+import * as generic from '../generic/arithmetic.mjs'
 
-// resolve the conflicts
-export {sqrt} from './sqrt.mjs'
-export {multiply} from './multiply.mjs'
+export default PocomathInstance.merge('number', numbers, generic)
+
