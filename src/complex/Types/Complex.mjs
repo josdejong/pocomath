@@ -12,9 +12,19 @@ const Complex = new PocomathInstance('Complex')
 Complex.installType('Complex', {
    test: isComplex,
    from: {
-      number: x => ({re: x, im: 0}),
+      number: x => ({re: x, im: 0})
+   }
+})
+Complex.installType('GaussianInteger', {
+   test: z => typeof z.re == 'bigint' && typeof z.im == 'bigint',
+   refines: 'Complex',
+   from: {
       bigint: x => ({re: x, im: 0n})
    }
 })
+
+Complex.promoteUnary = {
+   Complex: ({self,complex}) => z => complex(self(z.re), self(z.im))
+}
 
 export {Complex}

@@ -27,6 +27,7 @@ export default class PocomathInstance {
       this._typed = typed.create()
       this._typed.clear()
       this.Types = {any: anySpec} // dummy entry to track the default 'any' type
+      this._subtypes = {} // For each type, gives all of its (in)direct subtypes
       this._usedTypes = new Set() // all types that have occurred in a signature
       this._doomed = new Set() // for detecting circular reference
       this._config = {predictable: false}
@@ -190,6 +191,9 @@ export default class PocomathInstance {
     *        **to** this type to the corresponding conversion functions
     *    - before: [optional] a list of types this should be added
     *        before, in priority order
+    *    - refines: [optional] the name of a type that this is a subtype
+    *        of. This means the test is the conjunction of the given test and
+    *        the supertype test, and that it must come before the supertype.
     */
    /*
     * Implementation note: unlike _installFunctions below, we can make
@@ -202,29 +206,68 @@ export default class PocomathInstance {
          }
          return
       }
-      let beforeType = 'any'
-      for (const other of spec.before || []) {
-         if (other in this.Types) {
-            beforeType = other
-            break
+      if (spec.refines && !(spec.refines in this.Types)) {
+         throw new SyntaxError(
+            `Cannot install ${type} before its supertype ${spec.refines}`)
+      }
+      let beforeType = spec.refines
+      if (!beforeType) {
+         beforeType = 'any'
+         for (const other of spec.before || []) {
+            if (other in this.Types) {
+               beforeType = other
+               break
+            }
          }
       }
-      this._typed.addTypes([{name: type, test: spec.test}], beforeType)
+      let testFn = spec.test
+      if (spec.refines) {
+         const supertypeTest = this.Types[spec.refines].test
+         testFn = entity => supertypeTest(entity) && spec.test(entity)
+      }
+      this._typed.addTypes([{name: type, test: testFn}], beforeType)
+      this.Types[type] = spec
       /* Now add conversions to this type */
       for (const from in (spec.from || {})) {
          if (from in this.Types) {
-            this._typed.addConversion(
-               {from, to: type, convert: spec.from[from]})
+            // add conversions from "from" to this one and all its supertypes:
+            let nextSuper = type
+            while (nextSuper) {
+               this._typed.addConversion(
+                  {from, to: nextSuper, convert: spec.from[from]})
+               nextSuper = this.Types[nextSuper].refines
+            }
          }
       }
       /* And add conversions from this type */
       for (const to in this.Types) {
          if (type in (this.Types[to].from || {})) {
-            this._typed.addConversion(
-               {from: type, to, convert: this.Types[to].from[type]})
+            if (spec.refines == to || spec.refines in this._subtypes[to]) {
+               throw new SyntaxError(
+                  `Conversion of ${type} to its supertype ${to} disallowed.`)
+            }
+            let nextSuper = to
+            while (nextSuper) {
+               this._typed.addConversion({
+                  from: type,
+                  to: nextSuper,
+                  convert: this.Types[to].from[type]
+               })
+               nextSuper = this.Types[nextSuper].refines
+            }
          }
       }
-      this.Types[type] = spec
+      if (spec.refines) {
+         this._typed.addConversion(
+            {from: type, to: spec.refines, convert: x => x})
+      }
+      this._subtypes[type] = new Set()
+      // Update all the subtype sets of supertypes up the chain:
+      let nextSuper = spec.refines
+      while (nextSuper) {
+         this._subtypes[nextSuper].add(type)
+         nextSuper = this.Types[nextSuper].refines
+      }
       // rebundle anything that uses the new type:
       this._invalidateDependents(':' + type)
    }

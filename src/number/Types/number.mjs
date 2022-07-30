@@ -5,4 +5,9 @@ Number.installType('number', {
     test: n => typeof n === 'number',
     from: {string: s => +s}
 })
+Number.installType('NumInt', {
+    refines: 'number',
+    test: i => isFinite(i) && i === Math.round(i)
+})
+
 export {Number}

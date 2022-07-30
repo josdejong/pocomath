@@ -27,4 +27,7 @@ describe('number', () => {
       assert.deepStrictEqual(no.sqrt(-16), no.complex(0,4))
    })
 
+   it('computes gcd', () => {
+      assert.strictEqual(math.gcd(15, 35), 5)
+   })
 })

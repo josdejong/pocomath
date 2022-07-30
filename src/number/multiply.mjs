@@ -1,5 +1,3 @@
 export * from './Types/number.mjs'
 
-export const multiply = {
-   '...number': () => multiplicands => multiplicands.reduce((x,y) => x*y, 1),
-}
+export const multiply = {'number,number': () => (m,n) => m*n}
