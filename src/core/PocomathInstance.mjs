@@ -16,7 +16,9 @@ export default class PocomathInstance {
       'install',
       'installType',
       'name',
-      'Types'])
+      'Types',
+      'undefinedTypes'
+   ])
 
    constructor(name) {
       this.name = name
@@ -25,6 +27,7 @@ export default class PocomathInstance {
       this._typed = typed.create()
       this._typed.clear()
       this.Types = {any: anySpec} // dummy entry to track the default 'any' type
+      this._usedTypes = new Set() // all types that have occurred in a signature
       this._doomed = new Set() // for detecting circular reference
       this._config = {predictable: false}
       const self = this
@@ -226,6 +229,13 @@ export default class PocomathInstance {
       this._invalidateDependents(':' + type)
    }
 
+   /* Returns a list of all types that have been mentioned in the
+    * signatures of operations, but which have not actually been installed:
+    */
+   undefinedTypes() {
+      return Array.from(this._usedTypes).filter(t => !(t in this.Types))
+   }
+
    /* Used internally by install, see the documentation there */
    _installFunctions(functions) {
       for (const [name, spec] of Object.entries(functions)) {
@@ -246,6 +256,7 @@ export default class PocomathInstance {
                   this._addAffect(depname, name)
                }
                for (const type of typesOfSignature(signature)) {
+                  this._usedTypes.add(type)
                   this._addAffect(':' + type, name)
                }
             }

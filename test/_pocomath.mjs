@@ -2,6 +2,14 @@ import assert from 'assert'
 import math from '../src/pocomath.mjs'
 
 describe('The default full pocomath instance "math"', () => {
+   it('has no undefined types', () => {
+      const undef = math.undefinedTypes()
+      if (undef.length) {
+         console.log('Probable typo: found undefined types', undef)
+      }
+      assert.strictEqual(undef.length, 0)
+   })
+
    it('can subtract numbers', () => {
       assert.strictEqual(math.subtract(12, 5), 7)
    })
@@ -35,6 +43,9 @@ describe('The default full pocomath instance "math"', () => {
       assert.deepStrictEqual(math.complex(2,3), norm13)
       assert.deepStrictEqual(math.complex(2), math.complex(2,0))
       assert.deepStrictEqual(math.add(2, math.complex(0,3)), norm13)
+      assert.deepStrictEqual(
+         math.subtract(math.complex(1,1), math.complex(2,-2)),
+         math.complex(-1,3))
       assert.deepStrictEqual(
          math.subtract(16, math.add(3, math.complex(0,4), 2)),
          math.complex(11, -4))
