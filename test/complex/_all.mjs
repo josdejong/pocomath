@@ -29,4 +29,10 @@ describe('complex', () => {
          math.complex(ms.negate(ms.sqrt(0.5)), ms.sqrt(0.5)))
    })
 
+   it('computes gcd', () => {
+      assert.deepStrictEqual(
+         math.gcd(math.complex(53n, 56n), math.complex(47n, -13n)),
+         math.complex(4n, 5n))
+   })
+
 })

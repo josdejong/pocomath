@@ -1,7 +1,10 @@
 export * from './Types/generic.mjs'
 
+export {lcm} from './lcm.mjs'
+export {mod} from './mod.mjs'
 export {multiply} from './multiply.mjs'
 export {divide} from './divide.mjs'
 export {sign} from './sign.mjs'
 export {sqrt} from './sqrt.mjs'
+export {square} from './square.mjs'
 export {subtract} from './subtract.mjs'

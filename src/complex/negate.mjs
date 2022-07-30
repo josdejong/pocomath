@@ -1,5 +1,5 @@
-export * from './Types/Complex.mjs'
+import {Complex} from './Types/Complex.mjs'
 
-export const negate = {
-   Complex: ({self}) => z => ({re: self(z.re), im: self(z.im)})
-}
+const negate = Complex.promoteUnary
+
+export {Complex, negate}

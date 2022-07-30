@@ -52,4 +52,16 @@ describe('bigint', () => {
       assert.deepStrictEqual(bo.sqrt(-3249n), bo.complex(0n, 57n))
    })
 
+   it('computes gcd', () => {
+      assert.strictEqual(math.gcd(105n, 70n), 35n)
+   })
+
+   it('computes lcm', () => {
+      assert.strictEqual(math.lcm(105n, 70n), 210n)
+      assert.strictEqual(math.lcm(15n, 60n), 60n)
+      assert.strictEqual(math.lcm(0n, 17n), 0n)
+      assert.strictEqual(math.lcm(20n, 0n), 0n)
+      assert.strictEqual(math.lcm(0n, 0n), 0n)
+   })
+
 })

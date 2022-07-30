@@ -39,6 +39,7 @@ describe('A custom instance', () => {
       assert.strictEqual(pm.subtract(5, 10), -5)
       pm.install(complexAdd)
       pm.install(complexNegate)
+      pm.install(complexComplex)
       // Should be enough to allow complex subtraction, as subtract is generic:
       assert.deepStrictEqual(
          pm.subtract({re:5, im:0}, {re:10, im:1}), {re:-5, im: -1})
