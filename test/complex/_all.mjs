@@ -4,6 +4,15 @@ import PocomathInstance from '../../src/core/PocomathInstance.mjs'
 import * as complexSqrt from '../../src/complex/sqrt.mjs'
 
 describe('complex', () => {
+   it('supports division', () => {
+      assert.deepStrictEqual(
+         math.divide(math.complex(3,2), math.complex(0,1)),
+         math.complex(2,-3))
+      const reciprocal = math.divide(1, math.complex(1,3))
+      assert.strictEqual(reciprocal.re, 0.1)
+      assert.ok(Math.abs(reciprocal.im + 0.3) < 1e-13)
+   })
+
    it('supports sqrt', () => {
       assert.deepStrictEqual(math.sqrt(math.complex(1,0)), 1)
       assert.deepStrictEqual(
