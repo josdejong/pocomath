@@ -51,4 +51,12 @@ describe('complex', () => {
          math.complex(4n, 5n))
    })
 
+   it('computes floor', () => {
+      assert.deepStrictEqual(
+         math.floor(math.complex(19, 22.7)),
+         math.complex(19, 22))
+      const gi = math.complex(-1n, 1n)
+      assert.strictEqual(math.floor(gi), gi) // literally a no-op
+   })
+
 })

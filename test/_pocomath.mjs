@@ -3,12 +3,12 @@ import PocomathInstance from '../src/core/PocomathInstance.mjs'
 import math from '../src/pocomath.mjs'
 
 describe('The default full pocomath instance "math"', () => {
-   it('has no undefined types', () => {
+   it('has no unexpected undefined types', () => {
       const undef = math.undefinedTypes()
       if (undef.length) {
-         console.log('Probable typo: found undefined types', undef)
+         console.log('NOTE: Found undefined types', undef)
       }
-      assert.strictEqual(undef.length, 0)
+      assert.strictEqual(undef.length, 1) // Mentioning 'Fraction' but not using
    })
 
    it('has a built-in typeOf operator', () => {

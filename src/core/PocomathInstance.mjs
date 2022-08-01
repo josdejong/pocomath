@@ -471,6 +471,7 @@ export default class PocomathInstance {
          }
 
          for (const instType of instantiationSet) {
+            if (!(instType in this.Types)) continue
             if (this.Types[instType] === anySpec) continue
             const signature =
                   substituteInSig(trimSignature, theTemplateParam, instType)

@@ -64,4 +64,8 @@ describe('bigint', () => {
       assert.strictEqual(math.lcm(0n, 0n), 0n)
    })
 
+   it('allows floor as a no-op', () => {
+      assert.strictEqual(math.floor(-333n), -333n)
+   })
+
 })
