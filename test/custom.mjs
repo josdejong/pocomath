@@ -38,12 +38,20 @@ describe('A custom instance', () => {
       const pm = new PocomathInstance('piecemeal')
       pm.install(numbers)
       assert.strictEqual(pm.subtract(5, 10), -5)
+      assert.strictEqual(pm.floor(3.7), 3)
+      assert.throws(() => pm.floor(10n), TypeError)
       pm.install(complexAdd)
       pm.install(complexNegate)
       pm.install(complexComplex)
       // Should be enough to allow complex subtraction, as subtract is generic:
       assert.deepStrictEqual(
-         pm.subtract({re:5, im:0}, {re:10, im:1}), {re:-5, im: -1})
+         pm.subtract(pm.complex(5, 0), pm.complex(10, 1)),
+         math.complex(-5, -1))
+      // And now floor has been activated for Complex as well, since the type
+      // is present
+      assert.deepStrictEqual(
+         pm.floor(math.complex(1.9, 0)),
+         math.complex(1))
    })
 
    it("can defer definition of (even used) types", () => {

@@ -37,4 +37,10 @@ describe('number', () => {
       assert.ok(math.largerEq(12.5, math.divide(25,2)))
    })
 
+   it('Computes floor', () => {
+      assert.strictEqual(math.floor(7), 7)
+      assert.strictEqual(math.floor(6.99), 6)
+      assert.strictEqual(math.floor(1-1e-13), 1)
+   })
+
 })
