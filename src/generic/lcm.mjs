@@ -1,6 +1,7 @@
 export const lcm = {
-   'any,any': ({
-      multiply,
-      quotient,
-      gcd}) => (a,b) => multiply(quotient(a, gcd(a,b)), b)
+   'T,T': ({
+      'multiply(T,T)': multT,
+      'quotient(T,T)': quotT,
+      'gcd(T,T)': gcdT
+   }) => (a,b) => multT(quotT(a, gcdT(a,b)), b)
 }

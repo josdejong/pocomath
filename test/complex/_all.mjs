@@ -38,6 +38,13 @@ describe('complex', () => {
          math.complex(ms.negate(ms.sqrt(0.5)), ms.sqrt(0.5)))
    })
 
+   it('checks for equality', () => {
+      assert.ok(math.equal(math.complex(3,0), 3))
+      assert.ok(math.equal(math.complex(3,2), math.complex(3, 2)))
+      assert.ok(!(math.equal(math.complex(45n, 3n), math.complex(45n, -3n))))
+      assert.ok(!(math.equal(math.complex(45n, 3n), 45n)))
+   })
+
    it('computes gcd', () => {
       assert.deepStrictEqual(
          math.gcd(math.complex(53n, 56n), math.complex(47n, -13n)),

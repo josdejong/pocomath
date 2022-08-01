@@ -1,4 +1,5 @@
 import assert from 'assert'
+import PocomathInstance from '../src/core/PocomathInstance.mjs'
 import math from '../src/pocomath.mjs'
 
 describe('The default full pocomath instance "math"', () => {
@@ -10,14 +11,25 @@ describe('The default full pocomath instance "math"', () => {
       assert.strictEqual(undef.length, 0)
    })
 
+   it('has a built-in typeOf operator', () => {
+      assert.strictEqual(math.typeOf(42), 'NumInt')
+      assert.strictEqual(math.typeOf(-1.5), 'number')
+      assert.strictEqual(math.typeOf(-42n), 'bigint')
+      assert.strictEqual(math.typeOf(undefined), 'undefined')
+      assert.strictEqual(math.typeOf({re: 15n, im: -2n}), 'GaussianInteger')
+      assert.strictEqual(math.typeOf({re: 6.28, im: 2.72}), 'Complex')
+   })
+
    it('can subtract numbers', () => {
       assert.strictEqual(math.subtract(12, 5), 7)
+      //assert.strictEqual(math.subtract(3n, 1.5), 1.5)
    })
 
    it('can add numbers', () => {
       assert.strictEqual(math.add(3, 4), 7)
       assert.strictEqual(math.add(1.5, 2.5, 3.5), 7.5)
       assert.strictEqual(math.add(Infinity), Infinity)
+      assert.throws(() => math.add(3n, -1.5), TypeError)
    })
 
    it('can negate numbers', () => {
@@ -26,16 +38,17 @@ describe('The default full pocomath instance "math"', () => {
    })
 
    it('can be extended', () => {
-      math.installType('stringK', {
+      const stretch = PocomathInstance.merge(math) // clone to not pollute math
+      stretch.installType('stringK', {
          test: s => typeof s === 'string' && s.charAt(0) === 'K',
          before: ['string']
       })
-      math.install({
+      stretch.install({
          add: {
             '...stringK': () => addends => addends.reduce((x,y) => x+y, '')
          },
       })
-      assert.strictEqual(math.add('Kilroy','K is here'), 'KilroyK is here')
+      assert.strictEqual(stretch.add('Kilroy','K is here'), 'KilroyK is here')
    })
 
    it('handles complex numbers', () => {
@@ -46,10 +59,10 @@ describe('The default full pocomath instance "math"', () => {
       assert.deepStrictEqual(
          math.subtract(math.complex(1,1), math.complex(2,-2)),
          math.complex(-1,3))
+      assert.strictEqual(math.negate(math.complex(3, 8)).im, -8)
       assert.deepStrictEqual(
          math.subtract(16, math.add(3, math.complex(0,4), 2)),
          math.complex(11, -4))
-      assert.strictEqual(math.negate(math.complex(3, 8)).im, -8)
    })
 
    it('handles bigints', () => {

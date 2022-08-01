@@ -1,3 +1,7 @@
+/* Note we do not use a template here so that we can explicitly control
+ * which types this is instantiated for, namely the "integer" types, and
+ * not simply allow Pocomath to generate instances for any type it encounters.
+ */
 /* Returns a object that defines the gcd for the given type */
 export default function(type) {
    const producer = refs => {

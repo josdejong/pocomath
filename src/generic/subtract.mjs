@@ -1,3 +1,3 @@
 export const subtract = {
-   'any,any': ({add, negate}) => (x,y) => add(x, negate(y))
+   'T,T': ({'add(T,T)': addT, 'negate(T)': negT}) => (x,y) => addT(x, negT(y))
 }

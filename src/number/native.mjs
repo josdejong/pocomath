@@ -4,6 +4,7 @@ export * from './Types/number.mjs'
 
 export {abs} from './abs.mjs'
 export {add} from './add.mjs'
+export {compare} from './compare.mjs'
 export const gcd = gcdType('NumInt')
 export {invert} from './invert.mjs'
 export {isZero} from './isZero.mjs'

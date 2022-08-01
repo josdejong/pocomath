@@ -1,5 +1,3 @@
 export * from './Types/number.mjs'
 
-export const add = {
-   '...number': () => addends => addends.reduce((x,y) => x+y, 0),
-}
+export const add = {'number,number': () => (m,n) => m+n}

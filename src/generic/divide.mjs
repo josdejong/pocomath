@@ -1,4 +1,7 @@
 export const divide = {
-   'any,any': ({multiply, invert}) => (x, y) => multiply(x, invert(y))
+   'T,T': ({
+      'multiply(T,T)': multT,
+      'invert(T)': invT
+   }) => (x, y) => multT(x, invT(y))
 }
 

@@ -3,6 +3,7 @@ import math from '../src/pocomath.mjs'
 import PocomathInstance from '../src/core/PocomathInstance.mjs'
 import * as numbers from '../src/number/all.mjs'
 import * as numberAdd from '../src/number/add.mjs'
+import {add as genericAdd} from '../src/generic/arithmetic.mjs'
 import * as complex from '../src/complex/all.mjs'
 import * as complexAdd from '../src/complex/add.mjs'
 import * as complexNegate from '../src/complex/negate.mjs'
@@ -66,6 +67,7 @@ describe('A custom instance', () => {
       const cherry = new PocomathInstance('cherry')
       cherry.install(numberAdd)
       await extendToComplex(cherry)
+      cherry.install({add: genericAdd})
       /* Now we have an instance that supports addition for number and complex
          and little else:
       */

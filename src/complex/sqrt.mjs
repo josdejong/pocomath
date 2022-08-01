@@ -3,7 +3,7 @@ export * from './Types/Complex.mjs'
 export const sqrt = {
    Complex: ({
       config,
-      zero,
+      isZero,
       sign,
       one,
       add,
@@ -16,11 +16,8 @@ export const sqrt = {
    }) => {
       if (config.predictable) {
          return z => {
-            const imZero = zero(z.im)
-            const imSign = sign(z.im)
             const reOne = one(z.re)
-            const reSign = sign(z.re)
-            if (imSign === imZero && reSign === reOne) return complex(self(z.re))
+            if (isZero(z.im) && sign(z.re) === reOne) return complex(self(z.re))
             const reTwo = add(reOne, reOne)
             return complex(
                multiply(sign(z.im), self(divide(add(abs(z),z.re), reTwo))),
@@ -29,11 +26,8 @@ export const sqrt = {
          }
       }
       return z => {
-         const imZero = zero(z.im)
-         const imSign = sign(z.im)
          const reOne = one(z.re)
-         const reSign = sign(z.re)
-         if (imSign === imZero && reSign === reOne) return self(z.re)
+         if (isZero(z.im) && sign(z.re) === reOne) return self(z.re)
          const reTwo = add(reOne, reOne)
          return complex(
             multiply(sign(z.im), self(divide(add(abs(z),z.re), reTwo))),

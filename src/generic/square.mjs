@@ -1,3 +1,3 @@
 export const square = {
-   any: ({multiply}) => x => multiply(x,x)
+   T: ({'multiply(T,T)': multT}) => x => multT(x,x)
 }

@@ -1,6 +1,7 @@
 export const mod = {
-   'any,any': ({
-      subtract,
-      multiply,
-      quotient}) => (a,m) => subtract(a, multiply(m, quotient(a,m)))
+   'T,T': ({
+      'subtract(T,T)': subT,
+      'multiply(T,T)': multT,
+      'quotient(T,T)': quotT
+   }) => (a,m) => subT(a, multT(m, quotT(a,m)))
 }

@@ -30,4 +30,11 @@ describe('number', () => {
    it('computes gcd', () => {
       assert.strictEqual(math.gcd(15, 35), 5)
    })
+
+   it('compares numbers', () => {
+      assert.ok(math.smaller(12,13.5))
+      assert.ok(math.equal(Infinity, Infinity))
+      assert.ok(math.largerEq(12.5, math.divide(25,2)))
+   })
+
 })

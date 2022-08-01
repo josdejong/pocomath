@@ -3,6 +3,7 @@ import gcdType from '../generic/gcdType.mjs'
 export * from './Types/bigint.mjs'
 
 export {add} from './add.mjs'
+export {compare} from './compare.mjs'
 export {divide} from './divide.mjs'
 export const gcd = gcdType('bigint')
 export {isZero} from './isZero.mjs'
