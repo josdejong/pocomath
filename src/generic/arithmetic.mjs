@@ -4,6 +4,7 @@ export * from './Types/generic.mjs'
 
 export const add = reducingOperation
 export {lcm} from './lcm.mjs'
+export {mean} from './mean.mjs'
 export {mod} from './mod.mjs'
 export const multiply = reducingOperation
 export {divide} from './divide.mjs'

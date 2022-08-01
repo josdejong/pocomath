@@ -82,4 +82,15 @@ describe('The default full pocomath instance "math"', () => {
          math.complex(11n, -4n))
       assert.strictEqual(math.negate(math.complex(3n, 8n)).im, -8n)
    })
+
+   it('creates chains', () => {
+      const mychain = math.chain(7).negate()
+      assert.strictEqual(mychain.value, -7)
+      mychain.add(23).sqrt().lcm(10)
+      assert.strictEqual(mychain.value, 20)
+      assert.strictEqual(math.mean(3,4,5), 4)
+      assert.throws(() => math.chain(3).mean(4,5), /chain function.*split/)
+      assert.throws(() => math.chain(3).foo(), /Unknown operation/)
+   })
+
 })

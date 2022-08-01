@@ -1,6 +1,7 @@
 /* Core of pocomath: create an instance */
 import typed from 'typed-function'
 import dependencyExtractor from './dependencyExtractor.mjs'
+import {makeChain} from './Chain.mjs'
 import {subsetOfKeys, typesOfSignature} from './utils.mjs'
 
 const anySpec = {} // fixed dummy specification of 'any' type
@@ -21,6 +22,7 @@ export default class PocomathInstance {
     * must be added to this list.
     */
    static reserved = new Set([
+      'chain',
       'config',
       'importDependencies',
       'install',
@@ -64,6 +66,7 @@ export default class PocomathInstance {
             return true // successful
          }
       })
+      this._chainRepository = {} // place to store chainified functions
    }
 
    /**
@@ -162,6 +165,11 @@ export default class PocomathInstance {
          result.install(piece)
       }
       return result
+   }
+
+   /* Return a chain object for this instance with a given value: */
+   chain(value) {
+      return makeChain(value, this, this._chainRepository)
    }
 
    _installInstance(other) {
