@@ -17,7 +17,9 @@ describe('A custom instance', () => {
    it("works when partially assembled", () => {
       bw.install(complex)
       // Not much we can call without any number types:
-      assert.deepStrictEqual(bw.complex(0, 3), {re: 0, im: 3})
+      const i3 = {re: 0, im: 3}
+      assert.deepStrictEqual(bw.complex(0, 3), i3)
+      assert.deepStrictEqual(bw.chain(0).complex(3).value, i3)
       // Don't have a way to negate things, for example:
       assert.throws(() => bw.negate(2), TypeError)
    })
@@ -40,6 +42,7 @@ describe('A custom instance', () => {
       assert.strictEqual(pm.subtract(5, 10), -5)
       assert.strictEqual(pm.floor(3.7), 3)
       assert.throws(() => pm.floor(10n), TypeError)
+      assert.strictEqual(pm.chain(5).add(7).value, 12)
       pm.install(complexAdd)
       pm.install(complexNegate)
       pm.install(complexComplex)
@@ -52,6 +55,9 @@ describe('A custom instance', () => {
       assert.deepStrictEqual(
          pm.floor(math.complex(1.9, 0)),
          math.complex(1))
+      // And the chain functions refresh themselves:
+      assert.deepStrictEqual(
+         pm.chain(5).add(pm.chain(0).complex(7).value).value, math.complex(5,7))
    })
 
    it("can defer definition of (even used) types", () => {
