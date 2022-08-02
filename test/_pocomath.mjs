@@ -93,4 +93,14 @@ describe('The default full pocomath instance "math"', () => {
       assert.throws(() => math.chain(3).foo(), /Unknown operation/)
    })
 
+   it('calls plain factorial function', () => {
+      assert.strictEqual(math.factorial(4), 24n)
+      assert.strictEqual(math.factorial(7n), 5040n)
+   })
+
+   it('calculates binomial coefficients', () => {
+      assert.strictEqual(math.choose(6, 3), 20)
+      assert.strictEqual(math.choose(21n, 2n), 210n)
+   })
+
 })
