@@ -66,6 +66,7 @@ export default class PocomathInstance {
             return true // successful
          }
       })
+      this._plainFunctions = new Set() // the names of the plain functions
       this._chainRepository = {} // place to store chainified functions
    }
 
@@ -136,6 +137,8 @@ export default class PocomathInstance {
       for (const [item, spec] of Object.entries(ops)) {
          if (spec instanceof PocomathInstance) {
             this._installInstance(spec)
+         } else if (typeof spec === 'function') {
+            stdFunctions[item] = spec
          } else {
             if (item.charAt(0) === '_') {
                throw new SyntaxError(
@@ -182,6 +185,9 @@ export default class PocomathInstance {
          if (operator != 'typeOf') { // skip the builtin, we already have it
             migrateImps[operator] = other._imps[operator]
          }
+      }
+      for (const plain of other._plainFunctions) {
+         migrateImps[plain] = other[plain]
       }
       this._installFunctions(migrateImps)
    }
@@ -352,7 +358,21 @@ export default class PocomathInstance {
    /* Used internally by install, see the documentation there */
    _installFunctions(functions) {
       for (const [name, spec] of Object.entries(functions)) {
-         // new implementations, so set the op up to lazily recreate itself
+         if (typeof spec === 'function') {
+            if (name in this) {
+               if (spec === this[name]) continue
+               throw new SyntaxError(`Attempt to redefine function ${name}`)
+            }
+            this._plainFunctions.add(name)
+            this[name] = spec
+            continue
+         }
+         // new implementations, first check the name isn't taken
+         if (this._plainFunctions.has(name)) {
+            throw new SyntaxError(
+               `Can't add implementations to function ${name}`)
+         }
+         // All clear, so set the op up to lazily recreate itself
          this._invalidate(name)
          const opImps = this._imps[name]
          for (const [signature, behavior] of Object.entries(spec)) {
