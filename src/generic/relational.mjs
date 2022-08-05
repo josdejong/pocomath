@@ -7,14 +7,27 @@ export const isZero = {
 }
 
 export const equal = {
-   '!T,T': ({
+   'any,any': ({equalTT, joinTypes, Templates, typeOf}) => (x,y) => {
+      const resultant = joinTypes([typeOf(x), typeOf(y)], 'convert')
+      if (resultant === 'any' || resultant in Templates) {
+         return false
+      }
+      return equalTT(x,y)
+   }
+}
+
+export const equalTT = {
+   'T,T': ({
       'compare(T,T)': cmp,
       'isZero(T)': isZ
-   }) => (x,y) => isZ(cmp(x,y))
+   }) => (x,y) => isZ(cmp(x,y)),
+   // If templates were native to typed-function, we should be able to
+   // do something like:
+   // 'any,any': () => () => false // should only be hit for different types
 }
 
 export const unequal = {
-   'T,T': ({'equal(T.T)': eq}) => (x,y) => !(eq(x,y))
+   'any,any': ({equal}) => (x,y) => !(equal(x,y))
 }
 
 export const larger = {

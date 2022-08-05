@@ -1,10 +1,12 @@
 import gcdType from '../generic/gcdType.mjs'
+import {identity} from '../generic/identity.mjs'
 
 export * from './Types/number.mjs'
 
 export {abs} from './abs.mjs'
 export {add} from './add.mjs'
 export {compare} from './compare.mjs'
+export const conjugate = {number: () => identity}
 export const gcd = gcdType('NumInt')
 export {invert} from './invert.mjs'
 export {isZero} from './isZero.mjs'

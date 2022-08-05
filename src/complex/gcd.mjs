@@ -3,15 +3,18 @@ import * as Complex from './Types/Complex.mjs'
 import gcdType from '../generic/gcdType.mjs'
 
 const imps = {
-   gcdComplexRaw: gcdType('Complex'),
+   gcdGIRaw: gcdType('GaussianInteger'),
    gcd: { // Only return gcds with positive real part
-      'Complex, Complex': ({gcdComplexRaw, sign, one, negate}) => (z,m) => {
-         const raw = gcdComplexRaw(z, m)
-         if (sign(raw.re) === one(raw.re)) return raw
-         return negate(raw)
+      'GaussianInteger,GaussianInteger': ({
+         'gcdGIRaw(GaussianInteger,GaussianInteger)': gcdRaw,
+         'sign(bigint)': sgn,
+         'negate(GaussianInteger)': neg
+      }) => (z,m) => {
+         const raw = gcdRaw(z, m)
+         if (sgn(raw.re) === 1n) return raw
+         return neg(raw)
       }
    }
 }
 
 export const gcd = PocomathInstance.merge(Complex, imps)
-

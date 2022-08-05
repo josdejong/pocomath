@@ -103,4 +103,13 @@ describe('The default full pocomath instance "math"', () => {
       assert.strictEqual(math.choose(21n, 2n), 210n)
    })
 
+   it('calculates multi-way gcds and lcms', () => {
+      assert.strictEqual(math.gcd(30,105,42), 3)
+      assert.ok(
+         math.associate(
+            math.lcm(
+               math.complex(2n,1n), math.complex(1n,1n), math.complex(0n,1n)),
+            math.complex(1n,3n)))
+   })
+
 })

@@ -7,16 +7,16 @@ export const add = {
     */
    'Complex,number': ({
       'self(number,number)': addNum,
-      'complex(any,any)': cplx
+      'complex(number,number)': cplx
    }) => (z,x) => cplx(addNum(z.re, x), z.im),
 
    'Complex,bigint': ({
       'self(bigint,bigint)': addBigInt,
-      'complex(any,any)': cplx
+      'complex(bigint,bigint)': cplx
    }) => (z,x) => cplx(addBigInt(z.re, x), z.im),
 
    'Complex,Complex': ({
       self,
-      'complex(any,any)': cplx
-   }) => (w,z) => cplx(self(w.re, z.re), self(w.im, z.im))
+      complex
+   }) => (w,z) => complex(self(w.re, z.re), self(w.im, z.im))
 }

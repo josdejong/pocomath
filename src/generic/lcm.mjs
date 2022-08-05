@@ -1,3 +1,5 @@
+import {reducingOperation} from './reducingOperation.mjs'
+
 export const lcm = {
    'T,T': ({
       'multiply(T,T)': multT,
@@ -5,3 +7,4 @@ export const lcm = {
       'gcd(T,T)': gcdT
    }) => (a,b) => multT(quotT(a, gcdT(a,b)), b)
 }
+Object.assign(lcm, reducingOperation)

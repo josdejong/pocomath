@@ -9,7 +9,8 @@ export const complex = {
    'undefined': () => u => u,
    'undefined,any': () => (u, y) => u,
    'any,undefined': () => (x, u) => u,
-   'any,any': () => (x, y) => ({re: x, im: y}),
+   'undefined,undefined': () => (u, v) => u,
+   'T,T': () => (x, y) => ({re: x, im: y}),
    /* Take advantage of conversions in typed-function */
    Complex: () => z => z
 }

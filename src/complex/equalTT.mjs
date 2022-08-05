@@ -1,6 +1,6 @@
 export * from './Types/Complex.mjs'
 
-export const equal = {
+export const equalTT = {
    'Complex,number': ({
       'isZero(number)': isZ,
       'self(number,number)': eqNum

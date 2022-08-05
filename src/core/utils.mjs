@@ -6,6 +6,11 @@ export function subsetOfKeys(set, obj) {
    return true
 }
 
+/* Returns a list of the types mentioned in a typed-function signature */
+export function typeListOfSignature(signature) {
+   return signature.split(',').map(s => s.trim())
+}
+
 /* Returns a set of all of the types mentioned in a typed-function signature */
 export function typesOfSignature(signature) {
    return new Set(signature.split(/[^\w\d]/).filter(s => s.length))

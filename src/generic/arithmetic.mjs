@@ -3,6 +3,8 @@ import {reducingOperation} from './reducingOperation.mjs'
 export * from './Types/generic.mjs'
 
 export const add = reducingOperation
+export const gcd = reducingOperation
+export {identity} from './identity.mjs'
 export {lcm} from './lcm.mjs'
 export {mean} from './mean.mjs'
 export {mod} from './mod.mjs'

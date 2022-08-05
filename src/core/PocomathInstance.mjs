@@ -1,12 +1,13 @@
 /* Core of pocomath: create an instance */
 import typed from 'typed-function'
-import dependencyExtractor from './dependencyExtractor.mjs'
+import {dependencyExtractor, generateTypeExtractor} from './extractors.mjs'
 import {makeChain} from './Chain.mjs'
-import {subsetOfKeys, typesOfSignature} from './utils.mjs'
+import {typeListOfSignature, typesOfSignature, subsetOfKeys} from './utils.mjs'
 
 const anySpec = {} // fixed dummy specification of 'any' type
 
 const theTemplateParam = 'T' // First pass: only allow this one exact parameter
+const templateFromParam = 'U' // For defining covariant conversions
 
 /* Returns a new signature just like sig but with the parameter replaced by
  * the type
@@ -27,7 +28,10 @@ export default class PocomathInstance {
       'importDependencies',
       'install',
       'installType',
+      'joinTypes',
       'name',
+      'self',
+      'Templates',
       'typeOf',
       'Types',
       'undefinedTypes'
@@ -39,11 +43,17 @@ export default class PocomathInstance {
       this._affects = {}
       this._typed = typed.create()
       this._typed.clear()
+      this._typed.addTypes([{name: 'ground', test: () => true}])
       /* List of types installed in the instance. We start with just dummies
        * for the 'any' type and for type parameters:
        */
       this.Types = {any: anySpec}
       this.Types[theTemplateParam] = anySpec
+      this.Types.ground = anySpec
+      // All the template types that have been defined
+      this.Templates = {}
+      // The actual type testing functions
+      this._typeTests = {}
       this._subtypes = {} // For each type, gives all of its (in)direct subtypes
       /* The following gives for each type, a set of all types that could
        * match in typed-function's dispatch algorithm before the given type.
@@ -52,8 +62,8 @@ export default class PocomathInstance {
        * might match.
        */
       this._priorTypes = {}
-      this._usedTypes = new Set() // all types that have occurred in a signature
-      this._doomed = new Set() // for detecting circular reference
+      this._seenTypes = new Set() // all types that have occurred in a signature
+      this._invalid = new Set() // methods that are currently invalid
       this._config = {predictable: false, epsilon: 1e-12}
       const self = this
       this.config = new Proxy(this._config, {
@@ -68,6 +78,12 @@ export default class PocomathInstance {
       })
       this._plainFunctions = new Set() // the names of the plain functions
       this._chainRepository = {} // place to store chainified functions
+
+      this._installFunctions({
+         typeOf: {ground: {uses: new Set(), does: () => () => 'any'}}
+      })
+
+      this.joinTypes = this.joinTypes.bind(this)
    }
 
    /**
@@ -177,8 +193,11 @@ export default class PocomathInstance {
 
    _installInstance(other) {
       for (const [type, spec] of Object.entries(other.Types)) {
-         if (type === 'any' || this._templateParam(type)) continue
+         if (spec === anySpec) continue
          this.installType(type, spec)
+      }
+      for (const [base, info] of Object.entries(other.Templates)) {
+         this._installTemplateType(info.type, info.spec)
       }
       const migrateImps = {}
       for (const operator in other._imps) {
@@ -262,9 +281,14 @@ export default class PocomathInstance {
     * the corresponding changes to the _typed object immediately
     */
    installType(type, spec) {
-      if (this._templateParam(type)) {
+      const parts = type.split(/[<,>]/)
+      if (this._templateParam(parts[0])) {
          throw new SyntaxError(
             `Type name '${type}' reserved for template parameter`)
+      }
+      if (parts.some(this._templateParam.bind(this))) {
+         // It's a template, deal with it separately
+         return this._installTemplateType(type, spec)
       }
       if (type in this.Types) {
          if (spec !== this.Types[type]) {
@@ -278,7 +302,7 @@ export default class PocomathInstance {
       }
       let beforeType = spec.refines
       if (!beforeType) {
-         beforeType = 'any'
+         beforeType = 'ground'
          for (const other of spec.before || []) {
             if (other in this.Types) {
                beforeType = other
@@ -291,68 +315,129 @@ export default class PocomathInstance {
          const supertypeTest = this.Types[spec.refines].test
          testFn = entity => supertypeTest(entity) && spec.test(entity)
       }
+      this._typeTests[type] = testFn
       this._typed.addTypes([{name: type, test: testFn}], beforeType)
       this.Types[type] = spec
+      this._subtypes[type] = new Set()
       this._priorTypes[type] = new Set()
+      // Update all the subtype sets of supertypes up the chain
+      let nextSuper = spec.refines
+      while (nextSuper) {
+         this._invalidateDependents(':' + nextSuper)
+         this._priorTypes[nextSuper].add(type)
+         this._subtypes[nextSuper].add(type)
+         nextSuper = this.Types[nextSuper].refines
+      }
       /* Now add conversions to this type */
       for (const from in (spec.from || {})) {
          if (from in this.Types) {
             // add conversions from "from" to this one and all its supertypes:
             let nextSuper = type
             while (nextSuper) {
+               if (this._priorTypes[nextSuper].has(from)) break
                this._typed.addConversion(
                   {from, to: nextSuper, convert: spec.from[from]})
                this._invalidateDependents(':' + nextSuper)
                this._priorTypes[nextSuper].add(from)
+               /* And all of the subtypes of from are now prior as well: */
+               for (const subtype of this._subtypes[from]) {
+                  this._priorTypes[nextSuper].add(subtype)
+               }
                nextSuper = this.Types[nextSuper].refines
             }
          }
       }
       /* And add conversions from this type */
       for (const to in this.Types) {
-         if (type in (this.Types[to].from || {})) {
-            if (spec.refines == to || spec.refines in this._subtypes[to]) {
-               throw new SyntaxError(
-                  `Conversion of ${type} to its supertype ${to} disallowed.`)
-            }
-            let nextSuper = to
-            while (nextSuper) {
-               this._typed.addConversion({
-                  from: type,
-                  to: nextSuper,
-                  convert: this.Types[to].from[type]
-               })
-               this._invalidateDependents(':' + nextSuper)
-               this._priorTypes[nextSuper].add(type)
-               nextSuper = this.Types[nextSuper].refines
+         for (const fromtype in this.Types[to].from) {
+            if (type == fromtype
+                || (fromtype in this._subtypes
+                    && this._subtypes[fromtype].has(type))) {
+               if (spec.refines == to || spec.refines in this._subtypes[to]) {
+                  throw new SyntaxError(
+                     `Conversion of ${type} to its supertype ${to} disallowed.`)
+               }
+               let nextSuper = to
+               while (nextSuper) {
+                  this._typed.addConversion({
+                     from: type,
+                     to: nextSuper,
+                     convert: this.Types[to].from[fromtype]
+                  })
+                  this._invalidateDependents(':' + nextSuper)
+                  this._priorTypes[nextSuper].add(type)
+                  nextSuper = this.Types[nextSuper].refines
+               }
             }
          }
       }
-      // Update all the subtype sets of supertypes up the chain, and
-      // while we are at it add trivial conversions from subtypes to supertypes
-      // to help typed-function match signatures properly:
-      this._subtypes[type] = new Set()
-      let nextSuper = spec.refines
-      while (nextSuper) {
-         this._typed.addConversion(
-            {from: type, to: nextSuper, convert: x => x})
-         this._invalidateDependents(':' + nextSuper)
-         this._priorTypes[nextSuper].add(type)
-         this._subtypes[nextSuper].add(type)
-         nextSuper = this.Types[nextSuper].refines
-      }
-
       // update the typeOf function
       const imp = {}
       imp[type] = {uses: new Set(), does: () => () => type}
       this._installFunctions({typeOf: imp})
    }
 
+   /* Returns the most refined type of all the types in the array, with
+    * '' standing for the empty type for convenience. If the second
+    * argument `convert` is true, a convertible type is considered a
+    * a subtype (defaults to false).
+    */
+   joinTypes(types, convert) {
+      let join = ''
+      for (const type of types) {
+         join = this._joinTypes(join, type, convert)
+      }
+      return join
+   }
+   /* helper for above */
+   _joinTypes(typeA, typeB, convert) {
+      if (!typeA) return typeB
+      if (!typeB) return typeA
+      if (typeA === 'any' || typeB === 'any') return 'any'
+      if (typeA === 'ground' || typeB === 'ground') return 'ground'
+      if (typeA === typeB) return typeA
+      const subber = convert ? this._priorTypes : this._subtypes
+      if (subber[typeB].has(typeA)) return typeB
+      /* OK, so we need the most refined supertype of A that contains B:
+       */
+      let nextSuper = typeA
+      while (nextSuper) {
+         if (subber[nextSuper].has(typeB)) return nextSuper
+         nextSuper = this.Types[nextSuper].refines
+      }
+      /* And if conversions are allowed, we have to search the other way too */
+      if (convert) {
+         nextSuper = typeB
+         while (nextSuper) {
+            if (subber[nextSuper].has(typeA)) return nextSuper
+            nextSuper = this.Types[nextSuper].refines
+         }
+      }
+      return 'any'
+   }
+
    /* Returns a list of all types that have been mentioned in the
     * signatures of operations, but which have not actually been installed:
     */
    undefinedTypes() {
-      return Array.from(this._usedTypes).filter(t => !(t in this.Types))
+      return Array.from(this._seenTypes).filter(t => !(t in this.Types))
+   }
+
+   /* Used internally to install a template type */
+   _installTemplateType(type, spec) {
+      const base = type.split('<')[0]
+      /* For now, just allow a single template per base type; that
+       * might need to change later:
+       */
+      if (base in this.Templates) {
+         if (spec !== this.Templates[base].spec) {
+            throw new SyntaxError(
+               `Conflicting definitions of template type ${type}`)
+         }
+         return
+      }
+      // Nothing actually happens until we match a template parameter
+      this.Templates[base] = {type, spec}
    }
 
    /* Used internally by install, see the documentation there */
@@ -392,9 +477,12 @@ export default class PocomathInstance {
                   this._addAffect(depname, name)
                }
                for (const type of typesOfSignature(signature)) {
-                  if (this._templateParam(type)) continue
-                  this._usedTypes.add(type)
-                  this._addAffect(':' + type, name)
+                  for (const word of type.split(/[<>]/)) {
+                     if (word.length == 0) continue
+                     if (this._templateParam(word)) continue
+                     this._seenTypes.add(word)
+                     this._addAffect(':' + word, name)
+                  }
                }
             }
          }
@@ -420,20 +508,20 @@ export default class PocomathInstance {
     * and if it has no implementations so far, set them up.
     */
    _invalidate(name) {
-      if (this._doomed.has(name)) {
-         /* In the midst of a circular invalidation, so do nothing */
-         return
-      }
+      if (this._invalid.has(name)) return
       if (!(name in this._imps)) {
          this._imps[name] = {}
       }
-      this._doomed.add(name)
+      this._invalid.add(name)
       this._invalidateDependents(name)
-      this._doomed.delete(name)
       const self = this
       Object.defineProperty(this, name, {
          configurable: true,
-         get: () => self._bundle(name)
+         get: () => {
+            const result = self._bundle(name)
+            self._invalid.delete(name)
+            return result
+         }
       })
    }
 
@@ -457,22 +545,38 @@ export default class PocomathInstance {
       if (!imps) {
          throw new SyntaxError(`No implementations for ${name}`)
       }
-      const usableEntries = Object.entries(imps).filter(
-         ([signature]) => subsetOfKeys(typesOfSignature(signature), this.Types))
+      /* Collect the entries we know the types for */
+      const usableEntries = []
+      for (const entry of Object.entries(imps)) {
+         let keep = true
+         for (const type of typesOfSignature(entry[0])) {
+            if (type in this.Types) continue
+            const baseType = type.split('<')[0]
+            if (baseType in this.Templates) continue
+            keep = false
+            break
+         }
+         if (keep) usableEntries.push(entry)
+      }
       if (usableEntries.length === 0) {
          throw new SyntaxError(
             `Every implementation for ${name} uses an undefined type;\n`
                + `    signatures: ${Object.keys(imps)}`)
       }
+      /* Initial error checking done; mark this method as being
+       * in the midst of being reassembled
+       */
       Object.defineProperty(this, name, {configurable: true, value: 'limbo'})
       const tf_imps = {}
       for (const [rawSignature, behavior] of usableEntries) {
          /* Check if it's an ordinary non-template signature */
          let explicit = true
          for (const type of typesOfSignature(rawSignature)) {
-            if (this._templateParam(type)) { // template types need better check
-               explicit = false
-               break
+            for (const word of type.split(/[<>]/)) {
+               if (this._templateParam(word)) {
+                  explicit = false
+                  break
+               }
             }
          }
          if (explicit) {
@@ -485,16 +589,10 @@ export default class PocomathInstance {
             behavior.instantiations = new Set()
          }
          let instantiationSet = new Set()
-         let trimSignature = rawSignature
-         if (rawSignature.charAt(0) === '!') {
-            trimSignature = trimSignature.slice(1)
-            instantiationSet = this._usedTypes
-         } else {
-            for (const instType of behavior.instantiations) {
-               instantiationSet.add(instType)
-               for (const other of this._priorTypes[instType]) {
-                  instantiationSet.add(other)
-               }
+         for (const instType of behavior.instantiations) {
+            instantiationSet.add(instType)
+            for (const other of this._priorTypes[instType]) {
+               instantiationSet.add(other)
             }
          }
 
@@ -502,7 +600,7 @@ export default class PocomathInstance {
             if (!(instType in this.Types)) continue
             if (this.Types[instType] === anySpec) continue
             const signature =
-                  substituteInSig(trimSignature, theTemplateParam, instType)
+                  substituteInSig(rawSignature, theTemplateParam, instType)
             /* Don't override an explicit implementation: */
             if (signature in imps) continue
             const uses = new Set()
@@ -521,44 +619,170 @@ export default class PocomathInstance {
                      innerRefs[dep] = refs[outerName]
                   }
                }
-               const original = behavior.does(innerRefs)
                return behavior.does(innerRefs)
             }
-            this._addTFimplementation(tf_imps, signature, {uses, does: patch})
+            this._addTFimplementation(
+               tf_imps, signature, {uses, does: patch})
          }
          /* Now add the catchall signature */
+         let templateCall = `<${theTemplateParam}>`
+         /* Relying here that the base of 'Foo<T>' is 'Foo': */
+         let baseSignature = rawSignature.replaceAll(templateCall, '')
+         /* Any remaining template params are top-level */
          const signature = substituteInSig(
-            trimSignature, theTemplateParam, 'any')
+            baseSignature, theTemplateParam, 'ground')
          /* The catchall signature has to detect the actual type of the call
-          * and add the new instantiations
+          * and add the new instantiations.
+          * First, prepare the type inference data:
           */
-         const argTypes = trimSignature.split(',')
-         let exemplar = -1
-         for (let i = 0; i < argTypes.length; ++i) {
-            const argType = argTypes[i].trim()
-            if (argType === theTemplateParam) {
-               exemplar = i
-               break
-            }
-         }
-         if (exemplar < 0) {
+         const parTypes = rawSignature.split(',')
+         const restParam = (parTypes[parTypes.length-1].slice(0,3) === '...')
+         const topTyper = entity => this.typeOf(entity)
+         const inferences = parTypes.map(
+            type => generateTypeExtractor(
+               type,
+               theTemplateParam,
+               topTyper,
+               this.joinTypes.bind(this),
+               this.Templates))
+         if (inferences.every(x => !x)) { // all false
             throw new SyntaxError(
                `Cannot find template parameter in ${rawSignature}`)
          }
+         /* And eliminate template parameters from the dependencies */
+         const simplifiedUses = {}
+         for (const dep of behavior.uses) {
+            let [func, needsig] = dep.split(/[()]/)
+            if (needsig) {
+               const subsig = substituteInSig(needsig, theTemplateParam, '')
+               if (subsig === needsig) {
+                  simplifiedUses[dep] = dep
+               } else {
+                  simplifiedUses[dep] = func
+               }
+            } else {
+               simplifiedUses[dep] = dep
+            }
+         }
+         /* Now build the catchall implementation */
          const self = this
          const patch = (refs) => (...args) => {
-            const example = args[exemplar]
-            const instantiateFor = self.typeOf(example)
+            /* We unbundle the rest arg if there is one */
+            const regLength = args.length - 1
+            if (restParam) {
+               const restArgs = args.pop()
+               args = args.concat(restArgs)
+            }
+            /* Now infer the type we actually should have been called for */
+            let i = -1
+            let j = -1
+            /* collect the arg types */
+            const argTypes = []
+            for (const arg of args) {
+               ++j
+               // in case of rest parameter, reuse last parameter type:
+               if (i < inferences.length - 1) ++i
+               if (inferences[i]) {
+                  const argType = inferences[i](arg)
+                  if (!argType) {
+                     throw TypeError(
+                        `Type inference failed for argument ${j} of ${name}`)
+                  }
+                  if (argType === 'any') {
+                     throw TypeError(
+                        `In call to ${name}, incompatible template arguments: `
+                           + args.map(a => JSON.stringify(a)).join(', '))
+                  }
+                  argTypes.push(argType)
+               }
+            }
+            if (argTypes.length === 0) {
+               throw TypeError('Type inference failed for' + name)
+            }
+            let usedConversions = false
+            let instantiateFor = self.joinTypes(argTypes)
+            if (instantiateFor === 'any') {
+               usedConversions = true
+               instantiateFor = self.joinTypes(argTypes, usedConversions)
+               if (instantiateFor === 'any') {
+                  throw TypeError(
+                     `In call to ${name}, no type unifies arguments `
+                        + args.toString() + '; of types ' + argTypes.toString()
+                        + '; note each consecutive pair must unify to a '
+                        + 'supertype of at least one of them')
+               }
+            }
+            /* Generate the list of actual wanted types */
+            const wantTypes = parTypes.map(type => substituteInSig(
+               type, theTemplateParam, instantiateFor))
+            /* Now we have to add any actual types that are relevant
+             * to this invocation. Namely, that would be every formal parameter
+             * type in the invocation, with the parameter template instantiated
+             * by instantiateFor, and for all of instantiateFor's "prior types"
+             */
+            for (j = 0; j < parTypes.length; ++j) {
+               if (wantTypes[j] !== parTypes[j] && parTypes[j].includes('<')) {
+                  // actually used the param and is a template
+                  self._ensureTemplateTypes(parTypes[j], instantiateFor)
+               }
+            }
+            /* Transform the arguments if we used any conversions: */
+            if (usedConversions) {
+               i = - 1
+               for (j = 0; j < args.length; ++j) {
+                  if (i < parTypes.length - 1) ++i
+                  let wantType = parTypes[i]
+                  if (wantType.slice(0,3) === '...') {
+                     wantType = wantType.slice(3)
+                  }
+                  wantType = substituteInSig(
+                     wantType, theTemplateParam, instantiateFor)
+                  if (wantType !== parTypes[i]) {
+                     args[j] = self._typed.convert(args[j], wantType)
+                  }
+               }
+            }
+            /* Finally reassemble the rest args if there were any */
+            if (restParam) {
+               const restArgs = args.slice(regLength)
+               args = args.slice(0,regLength)
+               args.push(restArgs)
+            }
+            /* Arrange that the desired instantiation will be there next
+             * time so we don't have to go through that again for this type
+             */
             refs[theTemplateParam] = instantiateFor
             behavior.instantiations.add(instantiateFor)
             self._invalidate(name)
-            // And for now, we have to rely on the "any" implementation. Hope
-            // it matches the instantiated one!
-            return behavior.does(refs)(...args)
+            // And update refs because we now know the type we're instantiating
+            // for:
+            const innerRefs = {}
+            for (const dep in simplifiedUses) {
+               const simplifiedDep = simplifiedUses[dep]
+               if (dep === simplifiedDep) {
+                  innerRefs[dep] = refs[dep]
+               } else {
+                  let [func, needsig] = dep.split(/[()]/)
+                  if (self._typed.isTypedFunction(refs[simplifiedDep])) {
+                     const subsig = substituteInSig(
+                        needsig, theTemplateParam, instantiateFor)
+                     let resname = simplifiedDep
+                     if (resname === 'self') resname = name
+                     innerRefs[dep] = self._pocoresolve(resname, subsig)
+                  } else {
+                     innerRefs[dep] = refs[simplifiedDep]
+                  }
+               }
+            }
+            // Finally ready to make the call.
+            return behavior.does(innerRefs)(...args)
          }
+         // The actual uses value needs to be a set:
+         const outerUses = new Set(Object.values(simplifiedUses))
          this._addTFimplementation(
-            tf_imps, signature, {uses: behavior.uses, does: patch})
+            tf_imps, signature, {uses: outerUses, does: patch})
       }
+      this._correctPartialSelfRefs(tf_imps)
       const tf = this._typed(name, tf_imps)
       Object.defineProperty(this, name, {configurable: true, value: tf})
       return tf
@@ -579,9 +803,17 @@ export default class PocomathInstance {
       let part_self_references = []
       for (const dep of uses) {
          let [func, needsig] = dep.split(/[()]/)
-         const needTypes = needsig ? typesOfSignature(needsig) : new Set()
-         /* For now, punt on template parameters */
-         if (needTypes.has(theTemplateParam)) needsig = ''
+         /* Safety check that can perhaps be removed:
+          * Verify that the desired signature has been fully grounded:
+          */
+         if (needsig) {
+            const trysig = substituteInSig(needsig, theTemplateParam, '')
+            if (trysig !== needsig) {
+               throw new Error(
+                  'Attempt to add a template implementation: ' +
+                     `${signature} with dependency ${dep}`)
+            }
+         }
          if (func === 'self') {
             if (needsig) {
                if (full_self_referential) {
@@ -614,7 +846,7 @@ export default class PocomathInstance {
                // can bundle up func, and grab its signature if need be
                let destination = this[func]
                if (needsig) {
-                  destination = this._typed.find(destination, needsig)
+                  destination = this._pocoresolve(func, needsig)
                }
                refs[dep] = destination
             }
@@ -628,16 +860,215 @@ export default class PocomathInstance {
          return
       }
       if (part_self_references.length) {
-         imps[signature] = this._typed.referTo(
-            ...part_self_references, (...impls) => {
+         /* There is an obstruction here. The list part_self_references
+          * might contain a signature that requires conversion for self to
+          * handle. But I advocated this not be allowed in typed.referTo, which
+          * made sense for human-written functions, but is unfortunate now.
+          * So we have to defer creating these and correct them later, at
+          * least until we can add an option to typed-function.
+          */
+         imps[signature] = {
+            deferred: true,
+            builtRefs: refs,
+            sigDoes: does,
+            psr: part_self_references
+         }
+         return
+      }
+      imps[signature] = does(refs)
+   }
+
+   _correctPartialSelfRefs(imps) {
+      for (const aSignature in imps) {
+         if (!(imps[aSignature].deferred)) continue
+         const part_self_references = imps[aSignature].psr
+         const corrected_self_references = []
+         for (const neededSig of part_self_references) {
+            // Have to find a match for neededSig among the other signatures
+            // of this function. That's a job for typed-function, but we will
+            // try here:
+            if (neededSig in imps) { // the easy case
+               corrected_self_references.push(neededSig)
+               continue
+            }
+            // No exact match, try to get one that matches with
+            // subtypes since the whole conversion thing in typed-function
+            // is too complicated to reproduce
+            const foundSig = this._findSubtypeImpl(imps, neededSig)
+            if (foundSig) {
+               corrected_self_references.push(foundSig)
+            } else {
+               throw new Error(
+                  'Implement inexact self-reference in typed-function for '
+                     + neededSig)
+            }
+         }
+         const refs = imps[aSignature].builtRefs
+         const does = imps[aSignature].sigDoes
+         imps[aSignature] = this._typed.referTo(
+            ...corrected_self_references, (...impls) => {
                for (let i = 0; i < part_self_references.length; ++i) {
                   refs[`self(${part_self_references[i]})`] = impls[i]
                }
                return does(refs)
             }
          )
-         return
       }
-      imps[signature] = does(refs)
    }
+
+   /* This function analyzes the template and makes sure the
+    * instantiations of it for type and all prior types of type are present
+    * in the instance.
+    */
+   _ensureTemplateTypes(template, type) {
+      let [base, arg] = template.split('<', 2)
+      arg = arg.slice(0,-1)
+      if (!arg) {
+         throw new Error(
+            'Implementation error in _ensureTemplateTypes', template, type)
+      }
+      let instantiations
+      if (this._templateParam(arg)) { // 1st-level template
+         instantiations = new Set(this._priorTypes[type])
+         instantiations.add(type)
+      } else { // nested template
+         instantiations = this._ensureTemplateTypes(arg, type)
+      }
+      const resultingTypes = new Set()
+      for (const iType of instantiations) {
+         const resultType = this._maybeAddTemplateType(base, iType)
+         if (resultType) resultingTypes.add(resultType)
+      }
+      return resultingTypes
+   }
+
+   /* Maybe add the instantiation of template type base with argument tyoe
+    * instantiator to the Types of this instance, if it hasn't happened already.
+    * Returns the name of the type if added, false otherwise.
+    */
+   _maybeAddTemplateType(base, instantiator) {
+      const wantsType = `${base}<${instantiator}>`
+      if (wantsType in this.Types) return false
+      // OK, need to generate the type from the template
+      // Set up refines, before, test, and from
+      const newTypeSpec = {refines: base}
+      const maybeFrom = {}
+      const template = this.Templates[base].spec
+      if (!template) {
+         throw new Error(
+            `Implementor error in _maybeAddTemplateType ${base} ${instantiator}`)
+      }
+      const instantiatorSpec = this.Types[instantiator]
+      let beforeTypes = []
+      if (instantiatorSpec.before) {
+         beforeTypes = instantiatorSpec.before.map(type => `${base}<${type}>`)
+      }
+      if (template.before) {
+         for (const beforeTmpl of template.before) {
+            beforeTypes.push(
+               substituteInSig(beforeTmpl, theTemplateParam, instantiator))
+         }
+      }
+      if (beforeTypes.length > 0) {
+         newTypeSpec.before = beforeTypes
+      }
+      newTypeSpec.test = template.test(this._typeTests[instantiator])
+      if (template.from) {
+         for (let source in template.from) {
+            const instSource = substituteInSig(
+               source, theTemplateParam, instantiator)
+            let usesFromParam = false
+            for (const word of instSource.split(/[<>]/)) {
+               if (word === templateFromParam) {
+                  usesFromParam = true
+                  break
+               }
+            }
+            if (usesFromParam) {
+               for (const iFrom in instantiatorSpec.from) {
+                  const finalSource = substituteInSig(
+                     instSource, templateFromParam, iFrom)
+                  maybeFrom[finalSource] = template.from[source](
+                     instantiatorSpec.from[iFrom])
+               }
+               // Assuming all templates are covariant here, I guess...
+               for (const subType of this._subtypes[instantiator]) {
+                  const finalSource = substituteInSig(
+                     instSource, templateFromParam, subType)
+                  maybeFrom[finalSource] = template.from[source](x => x)
+               }
+            } else {
+               maybeFrom[instSource] = template.from[source]
+            }
+         }
+      }
+
+      if (Object.keys(maybeFrom).length > 0) {
+         newTypeSpec.from = maybeFrom
+      }
+      this.installType(wantsType, newTypeSpec)
+      return wantsType
+   }
+
+   _findSubtypeImpl(imps, neededSig) {
+      if (neededSig in imps) return neededSig
+      let foundSig = false
+      const typeList = typeListOfSignature(neededSig)
+      for (const otherSig in imps) {
+         const otherTypeList = typeListOfSignature(otherSig)
+         if (typeList.length !== otherTypeList.length) continue
+         let allMatch = true
+         for (let k = 0; k < typeList.length; ++k) {
+            let myType = typeList[k]
+            let otherType = otherTypeList[k]
+            if (otherType === theTemplateParam) {
+               otherTypeList[k] = 'ground'
+               otherType = 'ground'
+            }
+            if (otherType === '...T') {
+               otherTypeList[k] = '...ground'
+               otherType = 'ground'
+            }
+            const adjustedOtherType = otherType.replaceAll(
+               `<${theTemplateParam}>`, '')
+            if (adjustedOtherType !== otherType) {
+               otherTypeList[k] = adjustedOtherType
+               otherType = adjustedOtherType
+            }
+            if (myType.slice(0,3) === '...') myType = myType.slice(3)
+            if (otherType.slice(0,3) === '...') otherType = otherType.slice(3)
+            if (otherType === 'any') continue
+            if (otherType === 'ground') continue
+            if (!(otherType in this.Types)) {
+               allMatch = false
+               break
+            }
+            if (myType === otherType
+                || this._subtypes[otherType].has(myType)) {
+               continue
+            }
+            allMatch = false
+            break
+         }
+         if (allMatch) {
+            foundSig = otherTypeList.join(',')
+            break
+         }
+      }
+      return foundSig
+   }
+
+   _pocoresolve(name, sig) {
+      const typedfunc = this[name]
+      let result = undefined
+      try {
+         result = this._typed.find(typedfunc, sig, {exact: true})
+      } catch {
+      }
+      if (result) return result
+      const foundsig = this._findSubtypeImpl(this._imps[name], sig)
+      if (foundsig) return this._typed.find(typedfunc, foundsig)
+      return this._typed.find(typedfunc, sig)
+   }
+
 }

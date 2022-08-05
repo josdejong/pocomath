@@ -1,13 +1,12 @@
-import gcdType from '../generic/gcdType.mjs'
-
 export * from './Types/Complex.mjs'
 
 export {abs} from './abs.mjs'
 export {absquare} from './absquare.mjs'
 export {add} from './add.mjs'
-export {conjugate} from './conjugate.mjs'
+export {associate} from './associate.mjs'
 export {complex} from './complex.mjs'
-export {equal} from './equal.mjs'
+export {conjugate} from './conjugate.mjs'
+export {equalTT} from './equalTT.mjs'
 export {gcd} from './gcd.mjs'
 export {invert} from './invert.mjs'
 export {isZero} from './isZero.mjs'

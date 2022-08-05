@@ -12,7 +12,7 @@ export const floor = {
    // entry with type `bigint|NumInt|GaussianInteger` because they couldn't
    // be separately activated then
 
-   number: ({'equal(number,number)': eq}) => n => {
+   number: ({'equalTT(number,number)': eq}) => n => {
       if (eq(n, Math.round(n))) return Math.round(n)
       return Math.floor(n)
    },

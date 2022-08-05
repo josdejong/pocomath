@@ -1,5 +1,5 @@
 import assert from 'assert'
-import dependencyExtractor from '../../src/core/dependencyExtractor.mjs'
+import {dependencyExtractor} from '../../src/core/extractors.mjs'
 
 describe('dependencyExtractor', () => {
    it('will record the keys of a destructuring function', () => {
