@@ -2,16 +2,20 @@ import PocomathInstance from '../core/PocomathInstance.mjs'
 import * as Complex from './Types/Complex.mjs'
 import gcdType from '../generic/gcdType.mjs'
 
+const gcdComplexRaw = {}
+Object.assign(gcdComplexRaw, gcdType('Complex<bigint>'))
+Object.assign(gcdComplexRaw, gcdType('Complex<NumInt>'))
 const imps = {
-   gcdGIRaw: gcdType('GaussianInteger'),
+   gcdComplexRaw,
    gcd: { // Only return gcds with positive real part
-      'GaussianInteger,GaussianInteger': ({
-         'gcdGIRaw(GaussianInteger,GaussianInteger)': gcdRaw,
-         'sign(bigint)': sgn,
-         'negate(GaussianInteger)': neg
+      'Complex<T>,Complex<T>': ({
+         'gcdComplexRaw(Complex<T>,Complex<T>)': gcdRaw,
+         'sign(T)': sgn,
+         'one(T)': uno,
+         'negate(Complex<T>)': neg
       }) => (z,m) => {
          const raw = gcdRaw(z, m)
-         if (sgn(raw.re) === 1n) return raw
+         if (sgn(raw.re) === uno(raw.re)) return raw
          return neg(raw)
       }
    }

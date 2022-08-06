@@ -32,7 +32,12 @@ Tuple.installType('Tuple<T>', {
 })
 
 Tuple.promoteUnary = {
-   'Tuple<T>': ({'self(T)': me, tuple}) => t => tuple(...(t.elts.map(me)))
+   'Tuple<T>': ({
+      'self(T)': me,
+      tuple
+   }) => t => tuple(...(t.elts.map(x => me(x)))) // NOTE: this must use
+   // the inner arrow function to drop additional arguments that Array.map
+   // supplies, as otherwise the wrong signature of `me` might be used.
 }
 
 Tuple.promoteBinaryUnary = {

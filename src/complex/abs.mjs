@@ -1,5 +1,8 @@
 export * from './Types/Complex.mjs'
 
 export const abs = {
-    Complex: ({sqrt, 'absquare(Complex)': absq}) => z => sqrt(absq(z))
+    'Complex<T>': ({
+        'sqrt(T)': sqt,
+        'absquare(Complex<T>)': absq
+    }) => z => sqt(absq(z))
 }

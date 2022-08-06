@@ -12,5 +12,9 @@ export const complex = {
    'undefined,undefined': () => (u, v) => u,
    'T,T': () => (x, y) => ({re: x, im: y}),
    /* Take advantage of conversions in typed-function */
-   Complex: () => z => z
+   // 'Complex<T>': () => z => z
+   /* But help out because without templates built in to typed-function,
+    * type inference turns out to be too hard
+    */
+   'T': ({'zero(T)': zr}) => x => ({re: x, im: zr(x)})
 }

@@ -7,7 +7,7 @@ import {Complex} from '../complex/Types/Complex.mjs'
 export const floor = {
    bigint: () => x => x,
    NumInt: () => x => x, // Because Pocomath isn't part of typed-function, or
-   GaussianInteger: () => x => x, // at least have access to the real
+   'Complex<bigint>': () => x => x, // at least have access to the real
    // typed-function parse, we unfortunately can't coalesce these into one
    // entry with type `bigint|NumInt|GaussianInteger` because they couldn't
    // be separately activated then
@@ -17,7 +17,7 @@ export const floor = {
       return Math.floor(n)
    },
 
-   Complex: Complex.promoteUnary.Complex,
+   'Complex<T>': Complex.promoteUnary['Complex<T>'],
 
    // OK to include a type totally not in Pocomath yet, it'll never be
    // activated.

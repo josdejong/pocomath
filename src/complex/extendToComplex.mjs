@@ -15,4 +15,17 @@ export default async function extendToComplex(pmath) {
          // Guess it wasn't a method available in complex; no worries
       }
    }
+   // Since extension to complex was specifically requested, instantiate
+   // all of the templates so that the associated type conversions will
+   // be available to make function calls work immediately:
+   for (const baseType in pmath.Types) {
+      if (baseType in pmath.Templates || baseType.includes('<')) {
+         continue // don't mess with templates
+      }
+      const ignore = new Set(['undefined', 'any', 'T', 'ground'])
+      if (ignore.has(baseType)) continue
+      // (What we really want is a check for "numeric" types but we don't
+      //  have that concept (yet?)). If we did, we'd instantiate just for those...
+      pmath.instantiateTemplate('Complex', baseType)
+   }
 }
