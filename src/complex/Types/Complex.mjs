@@ -1,30 +1,27 @@
 import PocomathInstance from '../../core/PocomathInstance.mjs'
 
-/* Use a plain object with keys re and im for a complex; note the components
- * can be any type (for this proof-of-concept; in reality we'd want to
- * insist on some numeric or scalar supertype).
- */
-function isComplex(z) { 
-   return z && typeof z === 'object' && 're' in z && 'im' in z
-}
-
 const Complex = new PocomathInstance('Complex')
+// Base type that should generally not be used directly
 Complex.installType('Complex', {
-   test: isComplex,
-   from: {
-      number: x => ({re: x, im: 0})
-   }
+   test: z => z && typeof z === 'object' && 're' in z && 'im' in z
 })
-Complex.installType('GaussianInteger', {
-   test: z => typeof z.re == 'bigint' && typeof z.im == 'bigint',
-   refines: 'Complex',
+// Now the template type: Complex numbers are actually always homeogeneous
+// in their component types.
+Complex.installType('Complex<T>', {
+   infer: ({typeOf, joinTypes}) => z => joinTypes([typeOf(z.re), typeOf(z.im)]),
+   test: testT => z => testT(z.re) && testT(z.im),
    from: {
-      bigint: x => ({re: x, im: 0n})
+      T: t => ({re: t, im: t-t}), // hack: maybe need a way to call zero(T)
+      U: convert => u => {
+         const t = convert(u)
+         return ({re: t, im: t-t})
+      },
+      'Complex<U>': convert => cu => ({re: convert(cu.re), im: convert(cu.im)})
    }
 })
 
 Complex.promoteUnary = {
-   Complex: ({self,complex}) => z => complex(self(z.re), self(z.im))
+   'Complex<T>': ({'self(T)': me, complex}) => z => complex(me(z.re), me(z.im))
 }
 
 export {Complex}

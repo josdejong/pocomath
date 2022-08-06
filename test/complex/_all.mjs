@@ -49,6 +49,15 @@ describe('complex', () => {
       assert.deepStrictEqual(
          math.gcd(math.complex(53n, 56n), math.complex(47n, -13n)),
          math.complex(4n, 5n))
+      // And now works for NumInt, too!
+      assert.deepStrictEqual(
+         math.gcd(math.complex(53,56), math.complex(47, -13)),
+         math.complex(4, 5))
+      // But properly fails for general complex
+      assert.throws(
+         () => math.gcd(math.complex(5.3,5.6), math.complex(4.7, -1.3)),
+         TypeError
+      )
    })
 
    it('computes floor', () => {

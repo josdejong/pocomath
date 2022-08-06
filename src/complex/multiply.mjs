@@ -1,14 +1,15 @@
 export * from './Types/Complex.mjs'
 
 export const multiply = {
-   'Complex,Complex': ({
-      'complex(any,any)': cplx,
-      add,
-      subtract,
-      self
+   'Complex<T>,Complex<T>': ({
+      'complex(T,T)': cplx,
+      'add(T,T)': plus,
+      'subtract(T,T)': sub,
+      'self(T,T)': me,
+      'conjugate(T)': conj // makes quaternion multiplication work
    }) => (w,z) => {
       return cplx(
-         subtract(self(w.re, z.re), self(w.im, z.im)),
-         add(self(w.re, z.im), self(w.im, z.re)))
+         sub(me(w.re, z.re), me(conj(w.im), z.im)),
+         plus(me(conj(w.re), z.im), me(w.im, z.re)))
    }
 }

@@ -1,38 +1,39 @@
 export * from './Types/Complex.mjs'
 
 export const sqrt = {
-   Complex: ({
+   'Complex<T>': ({
       config,
-      isZero,
-      sign,
-      one,
-      add,
-      complex,
-      multiply,
-      self,
-      divide,
-      'abs(Complex)': abs,
-      subtract
+      'isZero(T)': isZ,
+      'sign(T)': sgn,
+      'one(T)': uno,
+      'add(T,T)': plus,
+      'complex(T)': cplxU,
+      'complex(T,T)': cplxB,
+      'multiply(T,T)': mult,
+      'self(T)': me,
+      'divide(T,T)': div,
+      'abs(Complex<T>)': absC,
+      'subtract(T,T)': sub
    }) => {
       if (config.predictable) {
          return z => {
-            const reOne = one(z.re)
-            if (isZero(z.im) && sign(z.re) === reOne) return complex(self(z.re))
-            const reTwo = add(reOne, reOne)
-            return complex(
-               multiply(sign(z.im), self(divide(add(abs(z),z.re), reTwo))),
-               self(divide(subtract(abs(z),z.re), reTwo))
+            const reOne = uno(z.re)
+            if (isZ(z.im) && sgn(z.re) === reOne) return cplxU(me(z.re))
+            const reTwo = plus(reOne, reOne)
+            return cplxB(
+               mult(sgn(z.im), me(div(plus(absC(z),z.re), reTwo))),
+               me(div(sub(absC(z),z.re), reTwo))
             )
          }
       }
       return z => {
-         const reOne = one(z.re)
-         if (isZero(z.im) && sign(z.re) === reOne) return self(z.re)
-         const reTwo = add(reOne, reOne)
-         return complex(
-            multiply(sign(z.im), self(divide(add(abs(z),z.re), reTwo))),
-            self(divide(subtract(abs(z),z.re), reTwo))
-         )
+         const reOne = uno(z.re)
+         if (isZ(z.im) && sgn(z.re) === reOne) return me(z.re)
+         const reTwo = plus(reOne, reOne)
+         const reSqrt = me(div(plus(absC(z),z.re), reTwo))
+         const imSqrt = me(div(sub(absC(z),z.re), reTwo))
+         if (reSqrt === undefined || imSqrt === undefined) return undefined
+         return cplxB(mult(sgn(z.im), reSqrt), imSqrt)
       }
    }
 }

@@ -2,14 +2,18 @@ export * from './Types/bigint.mjs'
 import isqrt from 'bigint-isqrt'
 
 export const sqrt = {
-   bigint: ({config, complex, 'self(Complex)': complexSqrt}) => {
+   bigint: ({
+      config,
+      'complex(bigint,bigint)': cplx,
+      'negate(bigint)': neg
+   }) => {
       if (config.predictable) {
          // Don't just return the constant isqrt here because the object
          // gets decorated with info that might need to be different
          // for different PocomathInstancss
          return b => isqrt(b)
       }
-      if (!complexSqrt) {
+      if (!cplx) {
          return b => {
             if (b >= 0n) {
                const trial = isqrt(b)
@@ -19,12 +23,16 @@ export const sqrt = {
          }
       }
       return b => {
-         if (b >= 0n) {
-            const trial = isqrt(b)
-            if (trial * trial === b) return trial
-            return undefined
+         if (b === undefined) return undefined
+         let real = true
+         if (b < 0n) {
+            b = neg(b)
+            real = false
          }
-         return complexSqrt(complex(b))
+         const trial = isqrt(b)
+         if (trial * trial !== b) return undefined
+         if (real) return trial
+         return cplx(0n, trial)
       }
    }
 }

@@ -1,6 +1,9 @@
 export * from './Types/Complex.mjs'
 
 export const conjugate = {
-   Complex: ({negate, complex}) => z => complex(z.re, negate(z.im))
+   'Complex<T>': ({
+      'negate(T)': neg,
+      'complex(T,T)': cplx
+   }) => z => cplx(z.re, neg(z.im))
 }
 

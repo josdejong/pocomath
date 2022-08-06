@@ -3,12 +3,14 @@ import math from '../src/pocomath.mjs'
 import PocomathInstance from '../src/core/PocomathInstance.mjs'
 import * as numbers from '../src/number/all.mjs'
 import * as numberAdd from '../src/number/add.mjs'
+import * as numberZero from '../src/number/zero.mjs'
 import {add as genericAdd} from '../src/generic/arithmetic.mjs'
 import * as complex from '../src/complex/all.mjs'
 import * as complexAdd from '../src/complex/add.mjs'
 import * as complexNegate from '../src/complex/negate.mjs'
 import * as complexComplex from '../src/complex/complex.mjs'
 import * as bigintAdd from '../src/bigint/add.mjs'
+import * as bigintZero from '../src/bigint/zero.mjs'
 import * as concreteSubtract from '../src/generic/subtract.concrete.mjs'
 import * as genericSubtract from '../src/generic/subtract.mjs'
 import extendToComplex from '../src/complex/extendToComplex.mjs'
@@ -54,9 +56,9 @@ describe('A custom instance', () => {
          math.complex(-5, -1))
       // And now floor has been activated for Complex as well, since the type
       // is present
-      assert.deepStrictEqual(
-         pm.floor(math.complex(1.9, 0)),
-         math.complex(1))
+      const fracComplex = math.complex(1.9, 0)
+      const intComplex = math.complex(1)
+      assert.deepStrictEqual(pm.floor(fracComplex), intComplex)
       // And the chain functions refresh themselves:
       assert.deepStrictEqual(
          pm.chain(5).add(pm.chain(0).complex(7).value).value, math.complex(5,7))
@@ -65,10 +67,11 @@ describe('A custom instance', () => {
    it("can defer definition of (even used) types", () => {
       const dt = new PocomathInstance('Deferred Types')
       dt.install(numberAdd)
+      dt.install(numberZero) // for promoting numbers to complex, to fill in im
       dt.install({times: {
          'number,number': () => (m,n) => m*n,
-         'Complex,Complex': ({complex}) => (w,z) => {
-            return complex(w.re*z.re - w.im*z.im, w.re*z.im + w.im*z.re)
+         'Complex<T>,Complex<T>': ({'complex(T,T)': cplx}) => (w,z) => {
+            return cplx(w.re*z.re - w.im*z.im, w.re*z.im + w.im*z.re)
          }
       }})
       // complex type not present but should still be able to add numbers:
@@ -82,6 +85,7 @@ describe('A custom instance', () => {
    it("can selectively import in cute ways", async function () {
       const cherry = new PocomathInstance('cherry')
       cherry.install(numberAdd)
+      cherry.install(numberZero) // for complex promotion
       await extendToComplex(cherry)
       cherry.install({add: genericAdd})
       /* Now we have an instance that supports addition for number and complex
@@ -124,12 +128,13 @@ describe('A custom instance', () => {
       inst.install(complexAdd)
       inst.install(complexComplex)
       inst.install(bigintAdd)
+      inst.install(bigintZero) // for complex promotion
       assert.strictEqual(
          inst.typeMerge(6n, inst.complex(3n, 2n)),
-         'Merge to GaussianInteger')
+         'Merge to Complex<bigint>')
       assert.strictEqual(
          inst.typeMerge(3, inst.complex(4.5,2.1)),
-         'Merge to Complex')
+         'Merge to Complex<number>')
       // The following is the current behavior, since 3 converts to 3+0i
       // which is technically the same Complex type as 3n+0ni.
       // This should clear up when Complex is templatized

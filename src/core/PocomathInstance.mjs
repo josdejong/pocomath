@@ -28,6 +28,7 @@ export default class PocomathInstance {
       'importDependencies',
       'install',
       'installType',
+      'instantiateTemplate',
       'joinTypes',
       'name',
       'self',
@@ -436,7 +437,12 @@ export default class PocomathInstance {
          }
          return
       }
-      // Nothing actually happens until we match a template parameter
+      // update the typeOf function
+      const imp = {}
+      imp[type] = {uses: new Set(['T']), does: ({T}) => () => `${base}<${T}>`}
+      this._installFunctions({typeOf: imp})
+
+      // Nothing else actually happens until we match a template parameter
       this.Templates[base] = {type, spec}
    }
 
@@ -767,8 +773,9 @@ export default class PocomathInstance {
                      const subsig = substituteInSig(
                         needsig, theTemplateParam, instantiateFor)
                      let resname = simplifiedDep
-                     if (resname === 'self') resname = name
-                     innerRefs[dep] = self._pocoresolve(resname, subsig)
+                     if (resname == 'self') resname = name
+                     innerRefs[dep] = self._pocoresolve(
+                        resname, subsig, refs[simplifiedDep])
                   } else {
                      innerRefs[dep] = refs[simplifiedDep]
                   }
@@ -782,7 +789,7 @@ export default class PocomathInstance {
          this._addTFimplementation(
             tf_imps, signature, {uses: outerUses, does: patch})
       }
-      this._correctPartialSelfRefs(tf_imps)
+      this._correctPartialSelfRefs(name, tf_imps)
       const tf = this._typed(name, tf_imps)
       Object.defineProperty(this, name, {configurable: true, value: tf})
       return tf
@@ -845,7 +852,7 @@ export default class PocomathInstance {
             } else {
                // can bundle up func, and grab its signature if need be
                let destination = this[func]
-               if (needsig) {
+               if (destination &&needsig) {
                   destination = this._pocoresolve(func, needsig)
                }
                refs[dep] = destination
@@ -878,7 +885,7 @@ export default class PocomathInstance {
       imps[signature] = does(refs)
    }
 
-   _correctPartialSelfRefs(imps) {
+   _correctPartialSelfRefs(name, imps) {
       for (const aSignature in imps) {
          if (!(imps[aSignature].deferred)) continue
          const part_self_references = imps[aSignature].psr
@@ -894,7 +901,7 @@ export default class PocomathInstance {
             // No exact match, try to get one that matches with
             // subtypes since the whole conversion thing in typed-function
             // is too complicated to reproduce
-            const foundSig = this._findSubtypeImpl(imps, neededSig)
+            const foundSig = this._findSubtypeImpl(name, imps, neededSig)
             if (foundSig) {
                corrected_self_references.push(foundSig)
             } else {
@@ -936,7 +943,7 @@ export default class PocomathInstance {
       }
       const resultingTypes = new Set()
       for (const iType of instantiations) {
-         const resultType = this._maybeAddTemplateType(base, iType)
+         const resultType = this.instantiateTemplate(base, iType)
          if (resultType) resultingTypes.add(resultType)
       }
       return resultingTypes
@@ -946,7 +953,7 @@ export default class PocomathInstance {
     * instantiator to the Types of this instance, if it hasn't happened already.
     * Returns the name of the type if added, false otherwise.
     */
-   _maybeAddTemplateType(base, instantiator) {
+   instantiateTemplate(base, instantiator) {
       const wantsType = `${base}<${instantiator}>`
       if (wantsType in this.Types) return false
       // OK, need to generate the type from the template
@@ -956,7 +963,7 @@ export default class PocomathInstance {
       const template = this.Templates[base].spec
       if (!template) {
          throw new Error(
-            `Implementor error in _maybeAddTemplateType ${base} ${instantiator}`)
+            `Implementor error in instantiateTemplate(${base}, ${instantiator})`)
       }
       const instantiatorSpec = this.Types[instantiator]
       let beforeTypes = []
@@ -1010,7 +1017,7 @@ export default class PocomathInstance {
       return wantsType
    }
 
-   _findSubtypeImpl(imps, neededSig) {
+   _findSubtypeImpl(name, imps, neededSig) {
       if (neededSig in imps) return neededSig
       let foundSig = false
       const typeList = typeListOfSignature(neededSig)
@@ -1047,6 +1054,13 @@ export default class PocomathInstance {
                 || this._subtypes[otherType].has(myType)) {
                continue
             }
+            if (otherType in this.Templates) {
+               if (this.instantiateTemplate(otherType, myType)) {
+                  let dummy
+                  dummy = this[name] // for side effects
+                  return this._findSubtypeImpl(name, this._imps[name], neededSig)
+               }
+            }
             allMatch = false
             break
          }
@@ -1058,17 +1072,28 @@ export default class PocomathInstance {
       return foundSig
    }
 
-   _pocoresolve(name, sig) {
-      const typedfunc = this[name]
+   _pocoresolve(name, sig, typedFunction) {
+      if (!this._typed.isTypedFunction(typedFunction)) {
+         typedFunction = this[name]
+      }
       let result = undefined
       try {
-         result = this._typed.find(typedfunc, sig, {exact: true})
+         result = this._typed.find(typedFunction, sig, {exact: true})
       } catch {
       }
       if (result) return result
-      const foundsig = this._findSubtypeImpl(this._imps[name], sig)
-      if (foundsig) return this._typed.find(typedfunc, foundsig)
-      return this._typed.find(typedfunc, sig)
+      const foundsig = this._findSubtypeImpl(name, this._imps[name], sig)
+      if (foundsig) return this._typed.find(typedFunction, foundsig)
+      // Make sure bundle is up-to-date:
+      typedFunction = this[name]
+      try {
+         result = this._typed.find(typedFunction, sig)
+      } catch {
+      }
+      if (result) return result
+      // total punt, revert to typed-function resolution on every call;
+      // hopefully this happens rarely:
+      return typedFunction
    }
 
 }

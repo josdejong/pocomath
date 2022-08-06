@@ -16,8 +16,8 @@ describe('The default full pocomath instance "math"', () => {
       assert.strictEqual(math.typeOf(-1.5), 'number')
       assert.strictEqual(math.typeOf(-42n), 'bigint')
       assert.strictEqual(math.typeOf(undefined), 'undefined')
-      assert.strictEqual(math.typeOf({re: 15n, im: -2n}), 'GaussianInteger')
-      assert.strictEqual(math.typeOf({re: 6.28, im: 2.72}), 'Complex')
+      assert.strictEqual(math.typeOf({re: 15n, im: -2n}), 'Complex<bigint>')
+      assert.strictEqual(math.typeOf({re: 6.28, im: 2.72}), 'Complex<number>')
    })
 
    it('can subtract numbers', () => {
@@ -105,11 +105,9 @@ describe('The default full pocomath instance "math"', () => {
 
    it('calculates multi-way gcds and lcms', () => {
       assert.strictEqual(math.gcd(30,105,42), 3)
-      assert.ok(
-         math.associate(
-            math.lcm(
-               math.complex(2n,1n), math.complex(1n,1n), math.complex(0n,1n)),
-            math.complex(1n,3n)))
+      const gaussianLCM = math.lcm(
+         math.complex(2n,1n), math.complex(1n,1n), math.complex(0n,1n))
+      assert.strictEqual(math.associate(gaussianLCM, math.complex(1n,3n)), true)
    })
 
 })
