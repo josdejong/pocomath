@@ -24,6 +24,7 @@
   },
   dependencies: {
     'bigint-isqrt': '^0.2.1',
+    'fraction.js': '^4.2.0',
     'typed-function': '^3.0.0',
   },
 }

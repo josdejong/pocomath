@@ -263,6 +263,7 @@ export default class PocomathInstance {
     * @param {{test: any => bool,  // the predicate for the type
     *          from: Record<string, <that type> => <type name>> // conversions
     *          before: string[]  // lower priority types
+    *          refines: string   // The type this is a subtype of
     *        }} specification
     *
     * The second parameter of this function specifies the structure of the
@@ -711,7 +712,12 @@ export default class PocomathInstance {
                   if (argType === 'any') {
                      throw TypeError(
                         `In call to ${name}, incompatible template arguments: `
-                           + args.map(a => JSON.stringify(a)).join(', '))
+                        // + args.map(a => JSON.stringify(a)).join(', ')
+                        // unfortunately barfs on bigints. Need a better formatter
+                        // wish we could just use the one that console.log uses;
+                        // is that accessible somehow?
+                           + args.map(a => a.toString()).join(', ')
+                           + ' of types ' + argTypes.join(', ') + argType)
                   }
                   argTypes.push(argType)
                }
@@ -947,7 +953,7 @@ export default class PocomathInstance {
             } else {
                throw new Error(
                   'Implement inexact self-reference in typed-function for '
-                     + neededSig)
+                     + `${name}(${neededSig})`)
             }
          }
          const refs = imps[aSignature].builtRefs
