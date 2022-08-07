@@ -68,4 +68,23 @@ describe('complex', () => {
       assert.strictEqual(math.floor(gi), gi) // literally a no-op
    })
 
+   it('performs rudimentary quaternion calculations', () => {
+      const q0 = math.quaternion(1, 0, 1, 0)
+      const q1 = math.quaternion(1, 0.5, 0.5, 0.75)
+      assert.deepStrictEqual(
+         q1,
+         math.complex(math.complex(1, 0.5), math.complex(0.5, 0.75)))
+      assert.deepStrictEqual(
+         math.add(q0,q1),
+         math.quaternion(2, 0.5, 1.5, 0.75))
+      assert.deepStrictEqual(
+         math.multiply(q0, q1),
+         math.quaternion(0.5, 1.25, 1.5, 0.25))
+      assert.deepStrictEqual(
+         math.multiply(q0, math.quaternion(2, 1, 0.1, 0.1)),
+         math.quaternion(1.9, 1.1, 2.1, -0.9))
+      assert.strictEqual(math.abs(q0), Math.sqrt(2))
+      assert.strictEqual(math.abs(q1), Math.sqrt(33)/4)
+   })
+
 })
