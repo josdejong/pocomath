@@ -3,6 +3,7 @@ import {identity} from '../generic/identity.mjs'
 
 export * from './Types/bigint.mjs'
 
+export {absquare} from './absquare.mjs'
 export {add} from './add.mjs'
 export {compare} from './compare.mjs'
 export const conjugate = {bigint: () => identity}

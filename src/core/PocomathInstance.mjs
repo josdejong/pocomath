@@ -64,6 +64,7 @@ export default class PocomathInstance {
        */
       this._priorTypes = {}
       this._seenTypes = new Set() // all types that have occurred in a signature
+      this._maxDepthSeen = 1 // deepest template nesting we've actually encountered
       this._invalid = new Set() // methods that are currently invalid
       this._config = {predictable: false, epsilon: 1e-12}
       const self = this
@@ -336,6 +337,7 @@ export default class PocomathInstance {
             let nextSuper = type
             while (nextSuper) {
                if (this._priorTypes[nextSuper].has(from)) break
+               if (from === nextSuper) break
                this._typed.addConversion(
                   {from, to: nextSuper, convert: spec.from[from]})
                this._invalidateDependents(':' + nextSuper)
@@ -360,12 +362,16 @@ export default class PocomathInstance {
                }
                let nextSuper = to
                while (nextSuper) {
-                  this._typed.addConversion({
-                     from: type,
-                     to: nextSuper,
-                     convert: this.Types[to].from[fromtype]
-                  })
-                  this._invalidateDependents(':' + nextSuper)
+                  if (type === nextSuper) break
+                  try { // may already be a conversion, and no way to ask
+                     this._typed.addConversion({
+                        from: type,
+                        to: nextSuper,
+                        convert: this.Types[to].from[fromtype]
+                     })
+                     this._invalidateDependents(':' + nextSuper)
+                  } catch {
+                  }
                   this._priorTypes[nextSuper].add(type)
                   nextSuper = this.Types[nextSuper].refines
                }
@@ -609,6 +615,14 @@ export default class PocomathInstance {
                   substituteInSig(rawSignature, theTemplateParam, instType)
             /* Don't override an explicit implementation: */
             if (signature in imps) continue
+            /* Don't go too deep */
+            let maxdepth = 0
+            for (const argType in typeListOfSignature(signature)) {
+               const depth = argType.split('<').length
+               if (depth > maxdepth) maxdepth = depth
+            }
+            if (maxdepth > this._maxDepthSeen + 1) continue
+            /* All right, go ahead and instantiate */
             const uses = new Set()
             for (const dep of behavior.uses) {
                if (this._templateParam(dep)) continue
@@ -718,6 +732,10 @@ export default class PocomathInstance {
                         + 'supertype of at least one of them')
                }
             }
+            const depth = instantiateFor.split('<').length
+            if (depth > self._maxDepthSeen) {
+               self._maxDepthSeen = depth
+            }
             /* Generate the list of actual wanted types */
             const wantTypes = parTypes.map(type => substituteInSig(
                type, theTemplateParam, instantiateFor))
@@ -790,6 +808,28 @@ export default class PocomathInstance {
             tf_imps, signature, {uses: outerUses, does: patch})
       }
       this._correctPartialSelfRefs(name, tf_imps)
+      // Make sure we have all of the needed (template) types; and if they
+      // can't be added (because they have been instantiated too deep),
+      // ditch the signature:
+      const badSigs = new Set()
+      for (const sig in tf_imps) {
+         for (const type of typeListOfSignature(sig)) {
+            if (type.includes('<')) {
+               // it's a template type, turn it into a template and an arg
+               let base = type.split('<',1)[0]
+               const arg = type.slice(base.length+1, -1)
+               if (base.slice(0,3) === '...') {
+                  base = base.slice(3)
+               }
+               if (this.instantiateTemplate(base, arg) === undefined) {
+                  badSigs.add(sig)
+               }
+            }
+         }
+      }
+      for (const badSig of badSigs) {
+         delete tf_imps[badSig]
+      }
       const tf = this._typed(name, tf_imps)
       Object.defineProperty(this, name, {configurable: true, value: tf})
       return tf
@@ -928,8 +968,8 @@ export default class PocomathInstance {
     * in the instance.
     */
    _ensureTemplateTypes(template, type) {
-      let [base, arg] = template.split('<', 2)
-      arg = arg.slice(0,-1)
+      const base = template.split('<', 1)[0]
+      const arg = template.slice(base.length + 1, -1)
       if (!arg) {
          throw new Error(
             'Implementation error in _ensureTemplateTypes', template, type)
@@ -951,9 +991,15 @@ export default class PocomathInstance {
 
    /* Maybe add the instantiation of template type base with argument tyoe
     * instantiator to the Types of this instance, if it hasn't happened already.
-    * Returns the name of the type if added, false otherwise.
+    * Returns the name of the type if added, false if it was already there,
+    * and undefined if the type is declined (because of being nested too deep).
     */
    instantiateTemplate(base, instantiator) {
+      const depth = instantiator.split('<').length
+      if (depth > this._maxDepthSeen ) {
+         // don't bother with types much deeper thant we have seen
+         return undefined
+      }
       const wantsType = `${base}<${instantiator}>`
       if (wantsType in this.Types) return false
       // OK, need to generate the type from the template
