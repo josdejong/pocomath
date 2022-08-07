@@ -21,5 +21,10 @@ export const floor = {
 
    // OK to include a type totally not in Pocomath yet, it'll never be
    // activated.
-   Fraction: ({quotient}) => f => quotient(f.n, f.d),
+   // Fraction: ({quotient}) => f => quotient(f.n, f.d), // oops have that now
+   BigNumber: ({
+      'round(BigNumber)': rnd,
+      'equal(BigNumber,BigNumber)': eq
+   }) => x => eq(x,round(x)) ? round(x) : x.floor()
+
 }

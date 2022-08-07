@@ -3,7 +3,8 @@ export const compare = {
 }
 
 export const isZero = {
-   'undefined': () => u => u === 0
+   'undefined': () => u => u === 0,
+   T: ({'equal(T,T)': eq, 'zero(T)': zr}) => t => eq(t, zr(t))
 }
 
 export const equal = {
@@ -33,18 +34,20 @@ export const unequal = {
 export const larger = {
    'T,T': ({
       'compare(T,T)': cmp,
-      'one(T)' : uno
-   }) => (x,y) => cmp(x,y) === uno(y)
+      'one(T)' : uno,
+      'equalTT(T,T)' : eq
+   }) => (x,y) => eq(cmp(x,y), uno(y))
 }
 
 export const largerEq = {
    'T,T': ({
       'compare(T,T)': cmp,
       'one(T)' : uno,
-      'isZero(T)' : isZ
+      'isZero(T)' : isZ,
+      'equalTT(T,T)': eq
    }) => (x,y) => {
       const c = cmp(x,y)
-      return isZ(c) || c === uno(y)
+      return isZ(c) || eq(c, uno(y))
    }
 }
 
@@ -52,16 +55,18 @@ export const smaller = {
    'T,T': ({
       'compare(T,T)': cmp,
       'one(T)' : uno,
-      'isZero(T)' : isZ
+      'isZero(T)' : isZ,
+      unequal
    }) => (x,y) => {
       const c = cmp(x,y)
-      return !isZ(c) && c !== uno(y)
+      return !isZ(c) && unequal(c, uno(y))
    }
 }
 
 export const smallerEq = {
    'T,T': ({
       'compare(T,T)': cmp,
-      'one(T)' : uno
-   }) => (x,y) => cmp(x,y) !== uno(y)
+      'one(T)' : uno,
+      unequal
+   }) => (x,y) => unequal(cmp(x,y), uno(y))
 }

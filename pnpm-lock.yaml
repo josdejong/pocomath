@@ -2,11 +2,13 @@ lockfileVersion: 5.4
 
 specifiers:
   bigint-isqrt: ^0.2.1
+  fraction.js: ^4.2.0
   mocha: ^10.0.0
   typed-function: ^3.0.0
 
 dependencies:
   bigint-isqrt: 0.2.1
+  fraction.js: 4.2.0
   typed-function: 3.0.0
 
 devDependencies:
@@ -191,6 +193,10 @@ packages:
     resolution: {integrity: sha512-b6suED+5/3rTpUBdG1gupIl8MPFCAMA0QXwmljLhvCUKcUvdE4gWky9zpuGCcXHOsz4J9wPGNWq6OKpmIzz3hQ==}
     hasBin: true
     dev: true
+
+  /fraction.js/4.2.0:
+    resolution: {integrity: sha512-MhLuK+2gUcnZe8ZHlaaINnQLl0xRIGRfcGk2yl8xoQAfHrSsL3rYu6FCmBdkdbhc9EPlwyGHewaRsvwRMJtAlA==}
+    dev: false
 
   /fs.realpath/1.0.0:
     resolution: {integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==}
