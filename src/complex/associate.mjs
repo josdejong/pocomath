@@ -1,3 +1,4 @@
+import Returns from '../core/Returns.mjs'
 export * from './Types/Complex.mjs'
 
 /* Returns true if w is z multiplied by a complex unit */
@@ -9,9 +10,9 @@ export const associate = {
         'one(T)': uno,
         'complex(T,T)': cplx,
         'negate(Complex<T>)': neg
-    }) => (w,z) => {
+    }) => Returns('boolean', (w,z) => {
         if (eq(w,z) || eq(w,neg(z))) return true
         const ti = times(z, cplx(zr(z.re), uno(z.im)))
         return eq(w,ti) || eq(w,neg(ti))
-    }
+    })
 }

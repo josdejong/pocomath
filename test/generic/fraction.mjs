@@ -92,4 +92,10 @@ describe('fraction', () => {
       assert.deepStrictEqual(math.square(tf), math.fraction(9/16))
    })
 
+   it('knows the types of its operations', () => {
+      assert.deepStrictEqual(
+         math.returnTypeOf('ceiling', 'Fraction'), 'Fraction')
+      assert.deepStrictEqual(
+         math.returnTypeOf('multiply', 'Fraction,Fraction'), 'Fraction')
+   })
 })

@@ -1,3 +1,8 @@
+import Returns from '../core/Returns.mjs'
 export const mean = {
-   '...any': ({add, divide}) => args => divide(add(...args), args.length)
+   '...T': ({
+      T,
+      add,
+      'divide(T,NumInt)': div
+   }) => Returns(T, args => div(add(...args), args.length))
 }

@@ -1,6 +1,9 @@
+import Returns from '../core/Returns.mjs'
+
 export const absquare = {
    T: ({
+      T,
       'square(T)': sq,
       'abs(T)': abval
-   }) => t => sq(abval(t))
+   }) => Returns(T, t => sq(abval(t)))
 }

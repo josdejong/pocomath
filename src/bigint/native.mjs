@@ -1,12 +1,12 @@
 import gcdType from '../generic/gcdType.mjs'
-import {identity} from '../generic/identity.mjs'
+import {identityType} from '../generic/identity.mjs'
 
 export * from './Types/bigint.mjs'
 
 export {absquare} from './absquare.mjs'
 export {add} from './add.mjs'
 export {compare} from './compare.mjs'
-export const conjugate = {bigint: () => identity}
+export const conjugate = {bigint: identityType('bigint')}
 export {divide} from './divide.mjs'
 export const gcd = gcdType('bigint')
 export {isZero} from './isZero.mjs'

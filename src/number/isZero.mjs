@@ -1,6 +1,6 @@
+import Returns from '../core/Returns.mjs'
 export * from './Types/number.mjs'
 
 export const isZero = {
-    number: () => n => n === 0,
-    NumInt: () => n => n === 0  // necessary because of generic template
+    'T:number': () => Returns('boolean', n => n === 0)
 }

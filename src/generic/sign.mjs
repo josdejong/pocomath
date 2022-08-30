@@ -1,3 +1,9 @@
+import Returns from '../core/Returns.mjs'
+
 export const sign = {
-   T: ({'compare(T,T)': cmp, 'zero(T)': Z}) => x => cmp(x, Z(x))
+   T: ({
+      T,
+      'compare(T,T)': cmp,
+      'zero(T)': Z
+   }) => Returns(T, x => cmp(x, Z(x)))
 }

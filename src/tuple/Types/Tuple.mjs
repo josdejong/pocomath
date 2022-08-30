@@ -1,25 +1,24 @@
 /* A template type representing a homeogeneous tuple of elements */
 import PocomathInstance from '../../core/PocomathInstance.mjs'
+import {Returns, returnTypeOf} from '../../core/Returns.mjs'
 
 const Tuple = new PocomathInstance('Tuple')
-// First a base type that will generally not be used directly
-Tuple.installType('Tuple', {
-   test: t => t && typeof t === 'object' && 'elts' in t && Array.isArray(t.elts)
-})
-// Now the template type that is the primary use of this
+
 Tuple.installType('Tuple<T>', {
-   // We are assuming that any 'Type<T>' refines 'Type', so this is
-   // not necessary:
-   // refines: 'Tuple',
-   // But we need there to be a way to determine the type of a tuple:
-   infer: ({typeOf, joinTypes}) => t => joinTypes(t.elts.map(typeOf)),
-   // For the test, we can assume that t is already a base tuple,
-   // and we get the test for T as an input and we have to return
-   // the test for Tuple<T>
+   // A test that "defines" the "base type", which is not really a type
+   // (only fully instantiated types are added to the universe)
+   base: t => t && typeof t === 'object' && 'elts' in t && Array.isArray(t.elts),
+   // The template portion of the test; it takes the test for T as
+   // input and returns the test for an entity _that already passes
+   // the base test_ to be a Tuple<T>:
    test: testT => t => t.elts.every(testT),
-   // These are only invoked for types U such that there is already
-   // a conversion from U to T, and that conversion is passed as an input
-   // and we have to return the conversion to Tuple<T>:
+   // And we need there to be a way to determine the (instantiation)
+   // type of an tuple (that has already passed the base test):
+   infer: ({typeOf, joinTypes}) => t => joinTypes(t.elts.map(typeOf)),
+   // Conversions. Parametrized conversions are only invoked for types
+   // U such that there is already a conversion from U to T, and that
+   // conversion is passed as an input, and we have to return the conversion
+   // function from the indicated template in terms of U to Tuple<T>:
    from: {
       'Tuple<U>': convert => tu => ({elts: tu.elts.map(convert)}),
       // Here since there is no U it's a straight conversion:
@@ -35,50 +34,66 @@ Tuple.promoteUnary = {
    'Tuple<T>': ({
       'self(T)': me,
       tuple
-   }) => t => tuple(...(t.elts.map(x => me(x)))) // NOTE: this must use
-   // the inner arrow function to drop additional arguments that Array.map
-   // supplies, as otherwise the wrong signature of `me` might be used.
+   }) => {
+      const compType = me.fromInstance.joinTypes(
+         returnTypeOf(me).split('|'), 'convert')
+      return Returns(
+         `Tuple<${compType}>`, t => tuple(...(t.elts.map(x => me(x)))))
+   }
 }
 
 Tuple.promoteBinaryUnary = {
-   'Tuple<T>,Tuple<T>': ({'self(T,T)': meB, 'self(T)': meU, tuple}) => (s,t) => {
-      let i = -1
-      let result = []
-      while (true) {
-         i += 1
-         if (i < s.elts.length) {
-            if (i < t.elts.length) result.push(meB(s.elts[i], t.elts[i]))
-            else result.push(meU(s.elts[i]))
-            continue
+   'Tuple<T>,Tuple<T>': ({'self(T,T)': meB, 'self(T)': meU, tuple}) => {
+      const compTypes = returnTypeOf(meB).split('|').concat(
+         returnTypeOf(meU).split('|'))
+      const compType = meU.fromInstance.joinTypes(compTypes, 'convert')
+      return Returns(`Tuple<${compType}>`, (s,t) => {
+         let i = -1
+         let result = []
+         while (true) {
+            i += 1
+            if (i < s.elts.length) {
+               if (i < t.elts.length) result.push(meB(s.elts[i], t.elts[i]))
+               else result.push(meU(s.elts[i]))
+               continue
+            }
+            if (i < t.elts.length) result.push(meU(t.elts[i]))
+            else break
          }
-         if (i < t.elts.length) result.push(meU(t.elts[i]))
-         else break
-      }
-      return tuple(...result)
+         return tuple(...result)
+      })
    }
 }
 
 Tuple.promoteBinary = {
-   'Tuple<T>,Tuple<T>': ({'self(T,T)': meB, tuple}) => (s,t) => {
-      const lim = Math.max(s.elts.length, t.elts.length)
-      const result = []
-      for (let i = 0; i < lim; ++i) {
-         result.push(meB(s.elts[i], t.elts[i]))
-      }
-      return tuple(...result)
+   'Tuple<T>,Tuple<T>': ({'self(T,T)': meB, tuple}) => {
+      const compType = meB.fromInstance.joinTypes(
+         returnTypeOf(meB).split('|'))
+      return Returns(`Tuple<${compType}>`, (s,t) => {
+         const lim = Math.max(s.elts.length, t.elts.length)
+         const result = []
+         for (let i = 0; i < lim; ++i) {
+            result.push(meB(s.elts[i], t.elts[i]))
+         }
+         return tuple(...result)
+      })
    }
 }
 
 Tuple.promoteBinaryStrict = {
-   'Tuple<T>,Tuple<T>': ({'self(T,T)': meB, tuple}) => (s,t) => {
-      if (s.elts.length !== t.elts.length) {
-         throw new RangeError('Tuple length mismatch') // get name of self ??
-      }
-      const result = []
-      for (let i = 0; i < s.elts.length; ++i) {
-         result.push(meB(s.elts[i], t.elts[i]))
-      }
-      return tuple(...result)
+   'Tuple<T>,Tuple<T>': ({'self(T,T)': meB, tuple}) => {
+      const compType = meB.fromInstance.joinTypes(
+         returnTypeOf(meB).split('|'))
+      return Returns(`Tuple<${compType}>`, (s,t) => {
+         if (s.elts.length !== t.elts.length) {
+            throw new RangeError('Tuple length mismatch') // get name of self ??
+         }
+         const result = []
+         for (let i = 0; i < s.elts.length; ++i) {
+            result.push(meB(s.elts[i], t.elts[i]))
+         }
+         return tuple(...result)
+      })
    }
 }
 

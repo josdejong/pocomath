@@ -135,13 +135,8 @@ describe('A custom instance', () => {
       assert.strictEqual(
          inst.typeMerge(3, inst.complex(4.5,2.1)),
          'Merge to Complex<number>')
-      // The following is the current behavior, since 3 converts to 3+0i
-      // which is technically the same Complex type as 3n+0ni.
-      // This should clear up when Complex is templatized
-      assert.strictEqual(inst.typeMerge(3, inst.complex(3n)), 'Merge to Complex')
-      // But types that truly cannot be merged should throw a TypeError
-      // Should add a variation of this with a more usual type once there is
-      // one not interconvertible with others...
+      assert.throws(
+         () => inst.typeMerge(3, inst.complex(3n)), TypeError)
       inst.install(genericSubtract)
       assert.throws(() => inst.typeMerge(3, undefined), TypeError)
    })

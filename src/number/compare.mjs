@@ -1,3 +1,5 @@
+import Returns from '../core/Returns.mjs'
+
 /* Lifted from mathjs/src/utils/number.js */
 /**
  * Minimum number added to one that makes the result different than one
@@ -48,5 +50,6 @@ function nearlyEqual (x, y, epsilon) {
 export const compare = {
   'number,number': ({
     config
-  }) => (x,y) => nearlyEqual(x, y, config.epsilon) ? 0 : (x > y ? 1 : -1)
+  }) => Returns(
+    'NumInt', (x,y) => nearlyEqual(x, y, config.epsilon) ? 0 : (x > y ? 1 : -1))
 }

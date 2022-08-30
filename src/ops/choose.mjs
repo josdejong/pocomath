@@ -1,11 +1,13 @@
-/* Note this is not a good algorithm for computing binomial coefficients,
+import Returns from '../core/Returns.mjs'
+
+/* Note this is _not_ a good algorithm for computing binomial coefficients,
  * it's just for demonstration purposes
  */
 export const choose = {
-   'NumInt,NumInt': ({factorial}) => (n,k) => Number(
-      factorial(n) / (factorial(k)*factorial(n-k))),
+   'NumInt,NumInt': ({factorial}) => Returns(
+      'NumInt', (n,k) => Number(factorial(n) / (factorial(k)*factorial(n-k)))),
    'bigint,bigint': ({
       factorial
-   }) => (n,k) => factorial(n) / (factorial(k)*factorial(n-k))
+   }) => Returns('bigint', (n,k) => factorial(n) / (factorial(k)*factorial(n-k)))
 }
         

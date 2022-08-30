@@ -1,4 +1,6 @@
 import PocomathInstance from '../../core/PocomathInstance.mjs'
+import Returns from '../../core/Returns.mjs'
+
 /* creates a PocomathInstance incorporating a new numeric type encapsulated
  * as a class. (This instance can the be `install()ed` in another to add the
  * type so created.)
@@ -22,15 +24,15 @@ export default function adapted(name, Thing, overrides) {
    // first a creator function, with name depending on the name of the thing:
    const creatorName = overrides.creatorName || name.toLowerCase()
    const creator = overrides[creatorName]
-      ? overrides[creatorName]('')
+      ? overrides[creatorName]['']
       : Thing[creatorName]
          ? (Thing[creatorName])
          : ((...args) => new Thing(...args))
    const defaultCreatorImps = {
-      '': () => () => creator(),
-      '...any': () => args => creator(...args)
+      '': () => Returns(name, () => creator()),
+      '...any': () => Returns(name, args => creator(...args))
    }
-   defaultCreatorImps[name] = () => x => x // x.clone(x)?
+   defaultCreatorImps[name] = () => Returns(name, x => x) // x.clone(x)?
    operations[creatorName] = overrides[creatorName] || defaultCreatorImps
 
    // We make the default instance, just as a place to check for methods
@@ -47,34 +49,35 @@ export default function adapted(name, Thing, overrides) {
       negate: 'neg'
    }
    const binaryOps = {
-      add: 'add',
-      compare: 'compare',
-      divide: 'div',
-      equalTT: 'equals',
-      gcd: 'gcd',
-      lcm: 'lcm',
-      mod: 'mod',
-      multiply: 'mul',
-      subtract: 'sub'
+      add: ['add', name],
+      compare: ['compare', name],
+      divide: ['div', name],
+      equalTT: ['equals', 'boolean'],
+      gcd: ['gcd', name],
+      lcm: ['lcm', name],
+      mod: ['mod', name],
+      multiply: ['mul', name],
+      subtract: ['sub', name]
    }
    for (const [mathname, standardname] of Object.entries(unaryOps)) {
       if (standardname in instance) {
          operations[mathname] = {}
-         operations[mathname][name] = () => t => t[standardname]()
+         operations[mathname][name] = () => Returns(name, t => t[standardname]())
       }
    }
    operations.zero = {}
-   operations.zero[name] = () => t => creator()
+   operations.zero[name] = () => Returns(name, t => creator())
    operations.one = {}
-   operations.one[name] = () => t => creator(1)
+   operations.one[name] = () => Returns(name, t => creator(1))
    operations.conjugate = {}
-   operations.conjugate[name] = () => t => t // or t.clone() ??
+   operations.conjugate[name] = () => Returns(name, t => t) // or t.clone() ??
 
    const binarySignature = `${name},${name}`
-   for (const [mathname, standardname] of Object.entries(binaryOps)) {
-      if (standardname in instance) {
+   for (const [mathname, spec] of Object.entries(binaryOps)) {
+      if (spec[0] in instance) {
          operations[mathname] = {}
-         operations[mathname][binarySignature] = () => (t,u) => t[standardname](u)
+         operations[mathname][binarySignature] = () => Returns(
+            spec[1], (t,u) => t[spec[0]](u))
       }
    }
    if ('operations' in overrides) {

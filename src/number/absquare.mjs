@@ -1,6 +1,7 @@
+import Returns from '../core/Returns.mjs'
 export * from './Types/number.mjs'
 
 /* Absolute value squared */
 export const absquare = {
-    number: ({'square(number)': sqn}) => n => sqn(n)
+    'T:number': ({T, 'square(T)': sqn}) => Returns(T, n => sqn(n))
 }

@@ -8,14 +8,12 @@ describe('tuple', () => {
 
    it('does not allow unification by converting consecutive arguments', () => {
       assert.throws(() => math.tuple(3, 5.2, 2n), /TypeError.*unif/)
-      // Hence, the order matters in a slightly unfortunate way,
-      // but I think being a little ragged in these edge cases is OK:
       assert.throws(
          () => math.tuple(3, 2n, math.complex(5.2)),
          /TypeError.*unif/)
-      assert.deepStrictEqual(
-         math.tuple(3, math.complex(2n), 5.2),
-         {elts: [math.complex(3), math.complex(2n), math.complex(5.2)]})
+      assert.throws(
+         () => math.tuple(3, math.complex(2n), 5.2),
+         /TypeError.*unif/)
    })
 
    it('can be tested for zero and equality', () => {
@@ -56,6 +54,9 @@ describe('tuple', () => {
       assert.deepStrictEqual(
          math.subtract(math.tuple(3n,4n,5n), math.tuple(2n,1n,0n)),
          math.tuple(1n,3n,5n))
+      assert.deepStrictEqual(
+         math.returnTypeOf('subtract', 'Tuple<bigint>,Tuple<bigint>'),
+         'Tuple<bigint>')
       assert.throws(
          () => math.subtract(math.tuple(5,6), math.tuple(7)),
          /RangeError/)
@@ -106,9 +107,16 @@ describe('tuple', () => {
    })
 
    it('supports sqrt', () => {
+      const mixedTuple = math.tuple(2, math.complex(0,2), 1.5)
       assert.deepStrictEqual(
-         math.sqrt(math.tuple(4,-4,2.25)),
-         math.tuple(2, math.complex(0,2), 1.5))
+         mixedTuple,
+         math.tuple(math.complex(2), math.complex(0,2), math.complex(1.5)))
+      assert.strictEqual(
+         math.returnTypeOf('tuple', 'NumInt, Complex<NumInt>, number'),
+         'Tuple<Complex<number>>')
+      assert.deepStrictEqual(math.sqrt(math.tuple(4,-4,2.25)), mixedTuple)
+      assert.strictEqual(
+         math.returnTypeOf('sqrt', 'Tuple<NumInt>'), 'Tuple<Complex<number>>')
    })
 
 })

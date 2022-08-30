@@ -20,9 +20,56 @@ describe('The default full pocomath instance "math"', () => {
       assert.strictEqual(math.typeOf({re: 6.28, im: 2.72}), 'Complex<number>')
    })
 
+   it('can determine the return types of operations', () => {
+      assert.strictEqual(math.returnTypeOf('negate', 'number'), 'number')
+      assert.strictEqual(math.returnTypeOf('negate', 'NumInt'), 'NumInt')
+      math.negate(math.complex(1.2, 2.8)) // TODO: make this call unnecessary
+      assert.strictEqual(
+         math.returnTypeOf('negate', 'Complex<number>'), 'Complex<number>')
+      assert.strictEqual(math.returnTypeOf('add', 'number,number'), 'number')
+      assert.strictEqual(math.returnTypeOf('add', 'NumInt,NumInt'), 'NumInt')
+      assert.strictEqual(math.returnTypeOf('add', 'NumInt,number'), 'number')
+      assert.strictEqual(math.returnTypeOf('add', 'number,NumInt'), 'number')
+      assert.deepStrictEqual(  // TODO: ditto
+         math.add(3, math.complex(2.5, 1)), math.complex(5.5, 1))
+      assert.strictEqual(
+         math.returnTypeOf('add', 'Complex<number>,NumInt'), 'Complex<number>')
+      // The following is not actually what we want, but the Pocomath type
+      // language isn't powerful enough at this point to capture the true
+      // return type:
+      assert.strictEqual(
+         math.returnTypeOf('add', 'number,NumInt,Complex<number>'), 'any')
+      assert.strictEqual(
+         math.returnTypeOf('chain', 'bigint'), 'Chain<bigint>')
+      assert.strictEqual(
+         math.returnTypeOf('returnTypeOf', 'string,string'), 'string')
+      assert.strictEqual(
+         math.returnTypeOf('conjugate', 'bigint'), 'bigint')
+      assert.strictEqual(
+         math.returnTypeOf('gcd', 'bigint,bigint'), 'bigint')
+      math.identity(math.fraction(3,5)) // TODO: ditto
+      assert.strictEqual(math.returnTypeOf('identity', 'Fraction'), 'Fraction')
+      assert.strictEqual(
+         math.returnTypeOf('quotient', 'bigint,bigint'), 'bigint')
+      math.abs(math.complex(2,1)) //TODO: ditto
+      assert.strictEqual(
+         math.returnTypeOf('abs','Complex<NumInt>'), 'number')
+      math.multiply(math.quaternion(1,1,1,1), math.quaternion(1,-1,1,-1)) // dit
+      const quatType = math.returnTypeOf(
+         'quaternion', 'NumInt,NumInt,NumInt,NumInt')
+      assert.strictEqual(quatType, 'Complex<Complex<NumInt>>')
+      assert.strictEqual(
+         math.returnTypeOf('multiply', quatType + ',' + quatType), quatType)
+      assert.strictEqual(math.returnTypeOf('isZero', 'NumInt'), 'boolean')
+      assert.strictEqual(
+         math.returnTypeOf('roundquotient', 'NumInt,number'), 'NumInt')
+      assert.strictEqual(
+         math.returnTypeOf('factorial', 'NumInt'), 'bigint')
+   })
+
    it('can subtract numbers', () => {
       assert.strictEqual(math.subtract(12, 5), 7)
-      //assert.strictEqual(math.subtract(3n, 1.5), 1.5)
+      assert.throws(() => math.subtract(3n, 1.5), 'TypeError')
    })
 
    it('can add numbers', () => {

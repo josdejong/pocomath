@@ -39,8 +39,8 @@ describe('complex', () => {
    })
 
    it('checks for equality', () => {
-      assert.ok(math.equal(math.complex(3,0), 3))
-      assert.ok(math.equal(math.complex(3,2), math.complex(3, 2)))
+      assert.ok(math.equal(math.complex(3, 0), 3))
+      assert.ok(math.equal(math.complex(3, 2), math.complex(3, 2)))
       assert.ok(!(math.equal(math.complex(45n, 3n), math.complex(45n, -3n))))
       assert.ok(!(math.equal(math.complex(45n, 3n), 45n)))
    })
@@ -83,6 +83,7 @@ describe('complex', () => {
       assert.deepStrictEqual(
          math.multiply(q0, math.quaternion(2, 1, 0.1, 0.1)),
          math.quaternion(1.9, 1.1, 2.1, -0.9))
+      math.absquare(math.complex(1.25, 2.5)) //HACK: need absquare(Complex<number>)
       assert.strictEqual(math.abs(q0), Math.sqrt(2))
       assert.strictEqual(math.abs(q1), Math.sqrt(33)/4)
    })

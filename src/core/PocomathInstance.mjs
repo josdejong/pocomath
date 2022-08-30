@@ -1,21 +1,93 @@
 /* Core of pocomath: create an instance */
 import typed from 'typed-function'
-import {dependencyExtractor, generateTypeExtractor} from './extractors.mjs'
 import {makeChain} from './Chain.mjs'
+import {dependencyExtractor, generateTypeExtractor} from './extractors.mjs'
+import {Returns, returnTypeOf} from './Returns.mjs'
 import {typeListOfSignature, typesOfSignature, subsetOfKeys} from './utils.mjs'
 
 const anySpec = {} // fixed dummy specification of 'any' type
 
+/* Template/signature parsing stuff; should probably be moved to a
+ * separate file, but it's a bit interleaved at the moment
+ */
+
 const theTemplateParam = 'T' // First pass: only allow this one exact parameter
+const restTemplateParam = `...${theTemplateParam}`
+const templateCall = `<${theTemplateParam}>`
 const templateFromParam = 'U' // For defining covariant conversions
+
+/* returns the pair [base, instance] for a template type. If the type
+ * is not a template, instance is undefined
+ */
+const templatePattern = /^\s*([^<\s]*)\s*<\s*(\S*)\s*>\s*$/
+function splitTemplate(type) {
+   if (!(type.includes('<'))) return [type, undefined]
+   const results = templatePattern.exec(type)
+   return [results[1], results[2]]
+}
+/* Returns the instance such that type is template instantiated for that
+ * instance.
+ */
+function whichInstance(type, template) {
+   if (template === theTemplateParam) return type
+   if (type === template) return ''
+   if (!(template.includes(templateCall))) {
+      throw new TypeError(
+         `Type ${template} is not a template, so can't produce ${type}`)
+   }
+   const [typeBase, typeInstance] = splitTemplate(type)
+   if (!typeInstance) {
+      throw new TypeError(
+         `Type ${type} not from a template, so isn't instance of ${template}`)
+   }
+   const [tempBase, tempInstance] = splitTemplate(template)
+   if (typeBase !== tempBase) {
+      throw new TypeError(
+         `Type ${type} has wrong top-level base to be instance of ${template}`)
+   }
+   return whichInstance(typeInstance, tempInstance)
+}
+/* Same as above, but for signatures */
+function whichSigInstance(sig, tempsig) {
+   const sigTypes = typeListOfSignature(sig)
+   const tempTypes = typeListOfSignature(tempsig)
+   const sigLength = sigTypes.length
+   if (sigLength === 0) {
+      throw new TypeError("No types in signature, so can't determine instance")
+   }
+   if (sigLength !== tempTypes.length) {
+      throw new TypeError(`Signatures ${sig} and ${tempsig} differ in length`)
+   }
+   let maybeInstance = whichInstance(sigTypes[0], tempTypes[0])
+   for (let i = 1; i < sigLength; ++i) {
+      const currInstance = whichInstance(sigTypes[i], tempTypes[i])
+      if (maybeInstance) {
+         if (currInstance && currInstance !== maybeInstance) {
+            throw new TypeError(
+               `Inconsistent instantiation of ${sig} from ${tempsig}`)
+         }
+      } else {
+         maybeInstance = currInstance
+      }
+   }
+   if (!maybeInstance) {
+      throw new TypeError(
+         `Signature ${sig} identical to ${tempsig}, not an instance`)
+   }
+   return maybeInstance
+}
 
 /* Returns a new signature just like sig but with the parameter replaced by
  * the type
  */
-function substituteInSig(sig, parameter, type) {
+const upperBounds = /\s*(\S*)\s*:\s*(\w*)\s*/g
+function substituteInSignature(signature, parameter, type) {
+   const sig = signature.replaceAll(upperBounds, '$1')
    const pattern = new RegExp("\\b" + parameter + "\\b", 'g')
    return sig.replaceAll(pattern, type)
 }
+
+let lastWhatToDo = null // used in an infinite descent check
 
 export default class PocomathInstance {
    /* Disallowed names for ops; beware, this is slightly non-DRY
@@ -29,9 +101,15 @@ export default class PocomathInstance {
       'install',
       'installType',
       'instantiateTemplate',
+      'isPriorTo',
+      'isSubtypeOf',
       'joinTypes',
       'name',
+      'returnTypeOf',
+      'resolve',
       'self',
+      'subtypesOf',
+      'supertypesOf',
       'Templates',
       'typeOf',
       'Types',
@@ -40,22 +118,47 @@ export default class PocomathInstance {
 
    constructor(name) {
       this.name = name
-      this._imps = {}
+      this._imps = {} // Pocomath implementations, with dependencies
+      this._TFimps = {} // typed-function implementations, dependencies resolved
       this._affects = {}
       this._typed = typed.create()
       this._typed.clear()
-      this._typed.addTypes([{name: 'ground', test: () => true}])
-      /* List of types installed in the instance. We start with just dummies
-       * for the 'any' type and for type parameters:
-       */
+      // The following is an additional typed-function universe for resolving
+      // uninstantiated template instances. It is linked to the main one in
+      // its onMismatch function, below:
+      this._metaTyped = typed.create()
+      this._metaTyped.clear()
+      // And these are the meta bindings: (I think we don't need separate
+      // invalidation for them as they are only accessed through a main call.)
+      this._meta = {} // The resulting typed-functions
+      this._metaTFimps = {} // and their implementations
+      const me = this
+      const myTyped = this._typed
+      this._typed.onMismatch = (name, args, sigs) => {
+         if (me._invalid.has(name)) {
+            // rebuild implementation and try again
+            return me[name](...args)
+         }
+         const metaversion = me._meta[name]
+         if (metaversion) {
+            return me._meta[name](...args)
+         }
+         me._typed.throwMismatchError(name, args, sigs)
+      }
+      // List of types installed in the instance: (We start with just dummies
+      // for the 'any' type and for type parameters.)
       this.Types = {any: anySpec}
       this.Types[theTemplateParam] = anySpec
-      this.Types.ground = anySpec
-      // All the template types that have been defined
+      // Types that have been moved into the metaverse:
+      this._metafiedTypes = new Set()
+      // All the template types that have been defined:
       this.Templates = {}
-      // The actual type testing functions
+      // And their instantiations:
+      this._instantiationsOf = {}
+      // The actual type testing functions:
       this._typeTests = {}
-      this._subtypes = {} // For each type, gives all of its (in)direct subtypes
+      // For each type, gives all of its (in)direct subtypes in topo order:
+      this._subtypes = {}
       /* The following gives for each type, a set of all types that could
        * match in typed-function's dispatch algorithm before the given type.
        * This is important because if we instantiate a template, we must
@@ -67,25 +170,19 @@ export default class PocomathInstance {
       this._maxDepthSeen = 1 // deepest template nesting we've actually encountered
       this._invalid = new Set() // methods that are currently invalid
       this._config = {predictable: false, epsilon: 1e-12}
-      const self = this
       this.config = new Proxy(this._config, {
          get: (target, property) => target[property],
          set: (target, property, value) => {
             if (value !== target[property]) {
                target[property] = value
-               self._invalidateDependents('config')
+               me._invalidateDependents('config')
             }
             return true // successful
          }
       })
       this._plainFunctions = new Set() // the names of the plain functions
       this._chainRepository = {} // place to store chainified functions
-
-      this._installFunctions({
-         typeOf: {ground: {uses: new Set(), does: () => () => 'any'}}
-      })
-
-      this.joinTypes = this.joinTypes.bind(this)
+      this.joinTypes = this.joinTypes.bind(me)
    }
 
    /**
@@ -144,7 +241,7 @@ export default class PocomathInstance {
     *    instantiation can be accomplished by prefixin the signature with an
     *    exclamation point.
     */
-   install(ops) {
+   install = Returns('void', function(ops) {
       if (ops instanceof PocomathInstance) {
          return _installInstance(ops)
       }
@@ -170,14 +267,17 @@ export default class PocomathInstance {
             const stdimps = {}
             for (const [signature, does] of Object.entries(spec)) {
                const uses = new Set()
-               does(dependencyExtractor(uses))
+               try {
+                  does(dependencyExtractor(uses))
+               } catch {
+               }
                stdimps[signature] = {uses, does}
             }
             stdFunctions[item] = stdimps
          }
       }
       this._installFunctions(stdFunctions)
-   }
+   })
 
    /* Merge any number of PocomathInstances or modules:  */
    static merge(name, ...pieces) {
@@ -188,10 +288,28 @@ export default class PocomathInstance {
       return result
    }
 
+   /* Determine the return type of an operation given an input signature */
+   returnTypeOf = Returns('string', function(operation, signature) {
+      for (const type of typeListOfSignature(signature)) {
+         this._maybeInstantiate(type)
+      }
+      if (typeof operation !== 'string') {
+         operation = operation.name
+      }
+      const details = this._pocoFindSignature(operation, signature)
+      if (details) {
+         return returnTypeOf(details.fn, signature, this)
+      }
+      return returnTypeOf(this[operation], signature, this)
+   })
+
    /* Return a chain object for this instance with a given value: */
-   chain(value) {
-      return makeChain(value, this, this._chainRepository)
-   }
+   chain = Returns(
+      sig => `Chain<${sig}>`,
+      function(value) {
+         return makeChain(value, this, this._chainRepository)
+      }
+   )
 
    _installInstance(other) {
       for (const [type, spec] of Object.entries(other.Types)) {
@@ -240,9 +358,9 @@ export default class PocomathInstance {
          for (const name of requiredSet) {
             for (const type of typeSet) {
                try {
-                  const modName = `../${type}/${name}.mjs`
-                  const mod = await import(modName)
-                  this.install(mod)
+                  const moduleName = `../${type}/${name}.mjs`
+                  const module = await import(moduleName)
+                  this.install(module)
                } catch (err) {
                   if (!(err.message.includes('find'))) {
                      // Not just a error because module doesn't exist
@@ -283,16 +401,17 @@ export default class PocomathInstance {
     * Implementation note: unlike _installFunctions below, we can make
     * the corresponding changes to the _typed object immediately
     */
-   installType(type, spec) {
-      const parts = type.split(/[<,>]/)
+   installType = Returns('void', function(type, spec) {
+      const parts = type.split(/[<,>]/).map(s => s.trim())
       if (this._templateParam(parts[0])) {
          throw new SyntaxError(
             `Type name '${type}' reserved for template parameter`)
       }
       if (parts.some(this._templateParam.bind(this))) {
-         // It's a template, deal with it separately
+         // It's an uninstantiated template, deal with it separately
          return this._installTemplateType(type, spec)
       }
+      const base = parts[0]
       if (type in this.Types) {
          if (spec !== this.Types[type]) {
             throw new SyntaxError(`Conflicting definitions of type ${type}`)
@@ -305,7 +424,7 @@ export default class PocomathInstance {
       }
       let beforeType = spec.refines
       if (!beforeType) {
-         beforeType = 'ground'
+         beforeType = 'any'
          for (const other of spec.before || []) {
             if (other in this.Types) {
                beforeType = other
@@ -321,14 +440,14 @@ export default class PocomathInstance {
       this._typeTests[type] = testFn
       this._typed.addTypes([{name: type, test: testFn}], beforeType)
       this.Types[type] = spec
-      this._subtypes[type] = new Set()
+      this._subtypes[type] = []
       this._priorTypes[type] = new Set()
       // Update all the subtype sets of supertypes up the chain
       let nextSuper = spec.refines
       while (nextSuper) {
          this._invalidateDependents(':' + nextSuper)
          this._priorTypes[nextSuper].add(type)
-         this._subtypes[nextSuper].add(type)
+         this._addSubtypeTo(nextSuper, type)
          nextSuper = this.Types[nextSuper].refines
       }
       /* Now add conversions to this type */
@@ -347,6 +466,21 @@ export default class PocomathInstance {
                for (const subtype of this._subtypes[from]) {
                   this._priorTypes[nextSuper].add(subtype)
                }
+
+               /* Add the conversion in the metaverse if need be: */
+               const [toBase, toInstance] = splitTemplate(nextSuper)
+               if (toInstance) {
+                  const [fromBase, fromInstance] = splitTemplate(from)
+                  if (!fromBase || fromBase !== toBase) {
+                     this._metafy(from)
+                     try {
+                        this._metaTyped.addConversion(
+                           {from, to: toBase, convert: spec.from[from]})
+                     } catch {
+                     }
+                  }
+               }
+
                nextSuper = this.Types[nextSuper].refines
             }
          }
@@ -356,8 +490,8 @@ export default class PocomathInstance {
          for (const fromtype in this.Types[to].from) {
             if (type == fromtype
                 || (fromtype in this._subtypes
-                    && this._subtypes[fromtype].has(type))) {
-               if (spec.refines == to || spec.refines in this._subtypes[to]) {
+                    && this.isSubtypeOf(type, fromtype))) {
+               if (spec.refines == to || this.isSubtypeOf(spec.refines,to)) {
                   throw new SyntaxError(
                      `Conversion of ${type} to its supertype ${to} disallowed.`)
                }
@@ -371,6 +505,16 @@ export default class PocomathInstance {
                         convert: this.Types[to].from[fromtype]
                      })
                      this._invalidateDependents(':' + nextSuper)
+                     /* Add the conversion in the metaverse if need be: */
+                     const [toBase, toInstance] = splitTemplate(nextSuper)
+                     if (toInstance && base !== toBase) {
+                        this._metafy(type)
+                        this._metaTyped.addConversion({
+                           from: type,
+                           to: toBase,
+                           convert: this.Types[to].from[fromtype]
+                        })
+                     }
                   } catch {
                   }
                   this._priorTypes[nextSuper].add(type)
@@ -381,43 +525,92 @@ export default class PocomathInstance {
       }
       // update the typeOf function
       const imp = {}
-      imp[type] = {uses: new Set(), does: () => () => type}
+      imp[type] = {uses: new Set(), does: () => Returns('string', () => type)}
       this._installFunctions({typeOf: imp})
+   })
+
+   _metafy(type) {
+      if (this._metafiedTypes.has(type)) return
+      this._metaTyped.addTypes([{name: type, test: this._typeTests[type]}])
+      this._metafiedTypes.add(type)
    }
 
-   /* Returns the most refined type of all the types in the array, with
-    * '' standing for the empty type for convenience. If the second
+   _addSubtypeTo(sup, sub) {
+      if (this.isSubtypeOf(sub, sup)) return
+      const supSubs = this._subtypes[sup]
+      let i
+      for (i = 0; i < supSubs.length; ++i) {
+         if (this.isSubtypeOf(sub, supSubs[i])) break
+      }
+      supSubs.splice(i, 0, sub)
+   }
+
+   /* Returns true if typeA is a strict subtype of type B */
+   isSubtypeOf = Returns('boolean', function(typeA, typeB) {
+      // Currently not considering types to be a subtype of 'any'
+      if (typeB === 'any' || typeA === 'any') return false
+      return this._subtypes[typeB].includes(typeA)
+   })
+
+   /* Returns true if typeA is a subtype of or converts to type B */
+   isPriorTo = Returns('boolean', function(typeA, typeB) {
+      if (!(typeB in this._priorTypes)) return false
+      return this._priorTypes[typeB].has(typeA)
+   })
+
+   /* Returns a list of the strict ubtypes of a given type, in topological
+    * sorted order (i.e, no type on the list contains one that comes after it).
+    */
+   subtypesOf = Returns('Array<string>', function(type) {
+      return this._subtypes[type] // should we clone?
+   })
+
+   /* Returns a list of the supertypes of a given type, starting with itself,
+    * in topological order
+    */
+   supertypesOf = Returns('Array<string>', function(type) {
+      const supList = []
+      while (type) {
+         supList.push(type)
+         type = this.Types[type].refines
+      }
+      return supList
+   })
+
+   /* Returns the most refined type containing all the types in the array,
+    * with '' standing for the empty type for convenience. If the second
     * argument `convert` is true, a convertible type is considered a
     * a subtype (defaults to false).
     */
-   joinTypes(types, convert) {
+   joinTypes = Returns('string', function(types, convert) {
       let join = ''
       for (const type of types) {
          join = this._joinTypes(join, type, convert)
       }
       return join
-   }
+   })
+
    /* helper for above */
    _joinTypes(typeA, typeB, convert) {
       if (!typeA) return typeB
       if (!typeB) return typeA
       if (typeA === 'any' || typeB === 'any') return 'any'
-      if (typeA === 'ground' || typeB === 'ground') return 'ground'
       if (typeA === typeB) return typeA
       const subber = convert ? this._priorTypes : this._subtypes
-      if (subber[typeB].has(typeA)) return typeB
+      const pick = convert ? 'has' : 'includes'
+      if (subber[typeB][pick](typeA)) return typeB
       /* OK, so we need the most refined supertype of A that contains B:
        */
       let nextSuper = typeA
       while (nextSuper) {
-         if (subber[nextSuper].has(typeB)) return nextSuper
+         if (subber[nextSuper][pick](typeB)) return nextSuper
          nextSuper = this.Types[nextSuper].refines
       }
       /* And if conversions are allowed, we have to search the other way too */
       if (convert) {
          nextSuper = typeB
          while (nextSuper) {
-            if (subber[nextSuper].has(typeA)) return nextSuper
+            if (subber[nextSuper][pick](typeA)) return nextSuper
             nextSuper = this.Types[nextSuper].refines
          }
       }
@@ -427,13 +620,14 @@ export default class PocomathInstance {
    /* Returns a list of all types that have been mentioned in the
     * signatures of operations, but which have not actually been installed:
     */
-   undefinedTypes() {
-      return Array.from(this._seenTypes).filter(t => !(t in this.Types))
-   }
+   undefinedTypes = Returns('Array<string>', function() {
+      return Array.from(this._seenTypes).filter(
+         t => !(t in this.Types || t in this.Templates))
+   })
 
    /* Used internally to install a template type */
    _installTemplateType(type, spec) {
-      const base = type.split('<')[0]
+      const [base] = splitTemplate(type)
       /* For now, just allow a single template per base type; that
        * might need to change later:
        */
@@ -444,10 +638,28 @@ export default class PocomathInstance {
          }
          return
       }
+
+      // install the "base type" in the meta universe:
+      let beforeType = 'any'
+      for (const other of spec.before || []) {
+         if (other in this.templates) {
+            beforeType = other
+            break
+         }
+      }
+      this._metaTyped.addTypes([{name: base, test: spec.base}], beforeType)
+      this._instantiationsOf[base] = new Set()
+
       // update the typeOf function
       const imp = {}
-      imp[type] = {uses: new Set(['T']), does: ({T}) => () => `${base}<${T}>`}
+      imp[type] = {
+         uses: new Set(['T']),
+         does: ({T}) => Returns('string', () => `${base}<${T}>`)
+      }
       this._installFunctions({typeOf: imp})
+
+      // Invalidate any functions that reference this template type:
+      this._invalidateDependents(':' + base)
 
       // Nothing else actually happens until we match a template parameter
       this.Templates[base] = {type, spec}
@@ -480,8 +692,27 @@ export default class PocomathInstance {
                      `Conflicting definitions of ${signature} for ${name}`)
                }
             } else {
-               // Must avoid aliasing into another instance:
-               opImps[signature] = {uses: behavior.uses, does: behavior.does}
+               /* Check if it's an ordinary non-template signature */
+               let explicit = true
+               for (const type of typesOfSignature(signature)) {
+                  for (const word of type.split(/[<>:\s]/)) {
+                     if (this._templateParam(word)) {
+                        explicit = false
+                        break
+                     }
+                  }
+                  if (!explicit) break
+               }
+               opImps[signature] = {
+                  explicit,
+                  resolved: false,
+                  uses: behavior.uses,
+                  does: behavior.does
+               }
+               if (!explicit) {
+                  opImps[signature].hasInstantiations = {}
+                  opImps[signature].needsInstantiations = new Set()
+               }
                for (const dep of behavior.uses) {
                   const depname = dep.split('(', 1)[0]
                   if (depname === 'self' || this._templateParam(depname)) {
@@ -520,11 +751,42 @@ export default class PocomathInstance {
     * Reset an operation to require creation of typed-function,
     * and if it has no implementations so far, set them up.
     */
-   _invalidate(name) {
-      if (this._invalid.has(name)) return
+   _invalidate(name, reason) {
       if (!(name in this._imps)) {
          this._imps[name] = {}
+         this._TFimps[name] = {}
+         this._metaTFimps[name] = {}
       }
+      if (reason) {
+         // Make sure no TF imps that depend on reason remain:
+         for (const [signature, behavior] of Object.entries(this._imps[name])) {
+            let invalidated = false
+            if (reason.charAt(0) === ':') {
+               const badType = reason.slice(1)
+               if (signature.includes(badType)) invalidated = true
+            } else {
+               for (const dep of behavior.uses) {
+                  if (dep.includes(reason)) {
+                     invalidated = true
+                     break
+                  }
+               }
+            }
+            if (invalidated) {
+               if (behavior.explicit) {
+                  if (behavior.resolved) delete this._TFimps[signature]
+                  behavior.resolved = false
+               } else {
+                  for (const fullSig
+                       of Object.values(behavior.hasInstantiations)) {
+                     delete this._TFimps[fullSig]
+                  }
+                  behavior.hasInstantiations = {}
+               }
+            }
+         }
+      }
+      if (this._invalid.has(name)) return
       this._invalid.add(name)
       this._invalidateDependents(name)
       const self = this
@@ -544,7 +806,7 @@ export default class PocomathInstance {
    _invalidateDependents(name) {
       if (name in this._affects) {
          for (const ancestor of this._affects[name]) {
-            this._invalidate(ancestor)
+            this._invalidate(ancestor, name)
          }
       }
    }
@@ -558,13 +820,15 @@ export default class PocomathInstance {
       if (!imps) {
          throw new SyntaxError(`No implementations for ${name}`)
       }
+      const tf_imps = this._TFimps[name]
+      const meta_imps = this._metaTFimps[name]
       /* Collect the entries we know the types for */
       const usableEntries = []
       for (const entry of Object.entries(imps)) {
          let keep = true
          for (const type of typesOfSignature(entry[0])) {
             if (type in this.Types) continue
-            const baseType = type.split('<')[0]
+            const [baseType] = splitTemplate(type)
             if (baseType in this.Templates) continue
             keep = false
             break
@@ -580,78 +844,109 @@ export default class PocomathInstance {
        * in the midst of being reassembled
        */
       Object.defineProperty(this, name, {configurable: true, value: 'limbo'})
-      const tf_imps = {}
       for (const [rawSignature, behavior] of usableEntries) {
-         /* Check if it's an ordinary non-template signature */
-         let explicit = true
-         for (const type of typesOfSignature(rawSignature)) {
-            for (const word of type.split(/[<>]/)) {
-               if (this._templateParam(word)) {
-                  explicit = false
-                  break
-               }
+         if (behavior.explicit) {
+            if (!(behavior.resolved)) {
+               this._addTFimplementation(tf_imps, rawSignature, behavior)
+               tf_imps[rawSignature]._pocoSignature = rawSignature
+               behavior.resolved = true
             }
-         }
-         if (explicit) {
-            this._addTFimplementation(tf_imps, rawSignature, behavior)
             continue
          }
          /* It's a template, have to instantiate */
-         /* First, add the known instantiations, gathering all types needed */
-         if (!('instantiations' in behavior)) {
-            behavior.instantiations = new Set()
+         /* First, find any upper bounds on the instantation */
+         /* TODO: handle multiple upper bounds */
+         upperBounds.lastIndex = 0
+         let ubType = upperBounds.exec(rawSignature)
+         if (ubType) {
+            ubType = ubType[2]
+            if (!ubType in this.Types) {
+               throw new TypeError(
+                  `Unknown type upper bound '${ubType}' in '${rawSignature}'`)
+            }
          }
+         /* First, add the known instantiations, gathering all types needed */
+         if (ubType) behavior.needsInstantiations.add(ubType)
          let instantiationSet = new Set()
-         for (const instType of behavior.instantiations) {
+         const ubTypes = new Set()
+         if (!ubType) {
+            // Collect all upper-bound types for this signature
+            for (const othersig in imps) {
+               const thisUB = upperBounds.exec(othersig)
+               if (thisUB) ubTypes.add(thisUB[2])
+               let basesig = othersig.replaceAll(templateCall, '')
+               if (basesig !== othersig) {
+                  // A template
+                  const testsig = substituteInSignature(
+                     basesig, theTemplateParam, '')
+                  if (testsig === basesig) {
+                     // that is not also top-level
+                     for (const templateType of typeListOfSignature(basesig)) {
+                        if (templateType.slice(0,3) === '...') {
+                           templateType = templateType.slice(3)
+                        }
+                        ubTypes.add(templateType)
+                     }
+                  }
+               }
+            }
+         }
+         for (const instType of behavior.needsInstantiations) {
             instantiationSet.add(instType)
-            for (const other of this._priorTypes[instType]) {
-               instantiationSet.add(other)
+            const otherTypes =
+                  ubType ? this.subtypesOf(instType) : this._priorTypes[instType]
+            for (const other of otherTypes) {
+               if (!(this._atOrBelowSomeType(other, ubTypes))) {
+                  instantiationSet.add(other)
+               }
+            }
+         }
+
+         /* Prevent other existing signatures from blocking use of top-level
+          * templates via conversions:
+          */
+         let baseSignature = rawSignature.replaceAll(templateCall, '')
+         /* Any remaining template params are top-level */
+         const signature = substituteInSignature(
+            baseSignature, theTemplateParam, 'any')
+         const hasTopLevel = (signature !== baseSignature)
+         if (!ubType && hasTopLevel) {
+            for (const othersig in imps) {
+               let basesig = othersig.replaceAll(templateCall, '')
+               const testsig = substituteInSignature(
+                  basesig, theTemplateParam, '')
+               if (testsig !== basesig) continue // a top-level template
+               for (let othertype of typeListOfSignature(othersig)) {
+                  if (othertype.slice(0,3) === '...') {
+                     othertype = othertype.slice(3)
+                  }
+                  if (this.Types[othertype] === anySpec) continue
+                  const testType = substituteInSignature(
+                     othertype, theTemplateParam, '')
+                  let otherTypeCollection = [othertype]
+                  if (testType !== othertype) {
+                     const [base] = splitTemplate(othertype)
+                     otherTypeCollection = this._instantiationsOf[base]
+                  }
+                  for (const possibility of otherTypeCollection) {
+                     for (const convtype of this._priorTypes[possibility]) {
+                        if (this.isSubtypeOf(convtype, possibility)) continue
+                        if (!(this._atOrBelowSomeType(convtype, ubTypes))) {
+                           instantiationSet.add(convtype)
+                        }
+                     }
+                  }
+               }
             }
          }
 
          for (const instType of instantiationSet) {
-            if (!(instType in this.Types)) continue
-            if (this.Types[instType] === anySpec) continue
-            const signature =
-                  substituteInSig(rawSignature, theTemplateParam, instType)
-            /* Don't override an explicit implementation: */
-            if (signature in imps) continue
-            /* Don't go too deep */
-            let maxdepth = 0
-            for (const argType in typeListOfSignature(signature)) {
-               const depth = argType.split('<').length
-               if (depth > maxdepth) maxdepth = depth
-            }
-            if (maxdepth > this._maxDepthSeen + 1) continue
-            /* All right, go ahead and instantiate */
-            const uses = new Set()
-            for (const dep of behavior.uses) {
-               if (this._templateParam(dep)) continue
-               uses.add(substituteInSig(dep, theTemplateParam, instType))
-            }
-            const patch = (refs) => {
-               const innerRefs = {}
-               for (const dep of behavior.uses) {
-                  if (this._templateParam(dep)) {
-                     innerRefs[dep] = instType
-                  } else {
-                     const outerName = substituteInSig(
-                        dep, theTemplateParam, instType)
-                     innerRefs[dep] = refs[outerName]
-                  }
-               }
-               return behavior.does(innerRefs)
-            }
-            this._addTFimplementation(
-               tf_imps, signature, {uses, does: patch})
+            this._instantiateTemplateImplementation(name, rawSignature, instType)
          }
          /* Now add the catchall signature */
-         let templateCall = `<${theTemplateParam}>`
-         /* Relying here that the base of 'Foo<T>' is 'Foo': */
-         let baseSignature = rawSignature.replaceAll(templateCall, '')
-         /* Any remaining template params are top-level */
-         const signature = substituteInSig(
-            baseSignature, theTemplateParam, 'ground')
+         /* (Not needed if if it's a bounded template) */
+         if (ubType) continue
+         if (behavior.resolved) continue
          /* The catchall signature has to detect the actual type of the call
           * and add the new instantiations.
           * First, prepare the type inference data:
@@ -670,148 +965,131 @@ export default class PocomathInstance {
             throw new SyntaxError(
                `Cannot find template parameter in ${rawSignature}`)
          }
-         /* And eliminate template parameters from the dependencies */
-         const simplifiedUses = {}
-         for (const dep of behavior.uses) {
-            let [func, needsig] = dep.split(/[()]/)
-            if (needsig) {
-               const subsig = substituteInSig(needsig, theTemplateParam, '')
-               if (subsig === needsig) {
-                  simplifiedUses[dep] = dep
-               } else {
-                  simplifiedUses[dep] = func
-               }
-            } else {
-               simplifiedUses[dep] = dep
-            }
-         }
+
          /* Now build the catchall implementation */
          const self = this
-         const patch = (refs) => (...args) => {
-            /* We unbundle the rest arg if there is one */
-            const regLength = args.length - 1
-            if (restParam) {
-               const restArgs = args.pop()
-               args = args.concat(restArgs)
-            }
-            /* Now infer the type we actually should have been called for */
-            let i = -1
-            let j = -1
-            /* collect the arg types */
-            const argTypes = []
-            for (const arg of args) {
-               ++j
-               // in case of rest parameter, reuse last parameter type:
-               if (i < inferences.length - 1) ++i
-               if (inferences[i]) {
-                  const argType = inferences[i](arg)
-                  if (!argType) {
-                     throw TypeError(
-                        `Type inference failed for argument ${j} of ${name}`)
-                  }
-                  if (argType === 'any') {
-                     throw TypeError(
-                        `In call to ${name}, incompatible template arguments: `
-                        // + args.map(a => JSON.stringify(a)).join(', ')
-                        // unfortunately barfs on bigints. Need a better formatter
-                        // wish we could just use the one that console.log uses;
-                        // is that accessible somehow?
-                           + args.map(a => a.toString()).join(', ')
-                           + ' of types ' + argTypes.join(', ') + argType)
-                  }
-                  argTypes.push(argType)
+         /* For return type annotation, we may have to fix this to
+            propagate the return type. At the moment we are just bagging
+         */
+         const patch = () => {
+            const patchFunc = (...tfBundledArgs) => {
+               /* We unbundle the rest arg if there is one */
+               let args = Array.from(tfBundledArgs)
+               const regLength = args.length - 1
+               if (restParam) {
+                  const restArgs = args.pop()
+                  args = args.concat(restArgs)
                }
-            }
-            if (argTypes.length === 0) {
-               throw TypeError('Type inference failed for' + name)
-            }
-            let usedConversions = false
-            let instantiateFor = self.joinTypes(argTypes)
-            if (instantiateFor === 'any') {
-               usedConversions = true
-               instantiateFor = self.joinTypes(argTypes, usedConversions)
+               /* Now infer the type we actually should have been called for */
+               let i = -1
+               let j = -1
+               /* collect the arg types */
+               const argTypes = []
+               for (const arg of args) {
+                  ++j
+                  // in case of rest parameter, reuse last parameter type:
+                  if (i < inferences.length - 1) ++i
+                  if (inferences[i]) {
+                     const argType = inferences[i](arg)
+                     if (!argType) {
+                        throw TypeError(
+                           `Type inference failed for argument ${j} of ${name}`)
+                     }
+                     if (argType === 'any') {
+                        throw TypeError(
+                           `In call to ${name}, `
+                              + 'incompatible template arguments:'
+                           // + args.map(a => JSON.stringify(a)).join(', ')
+                           // unfortunately barfs on bigints. Need a better
+                           // formatter. I wish we could just use the one that
+                           // console.log uses; is that accessible somehow?
+                              + args.map(a => a.toString()).join(', ')
+                              + ' of types ' + argTypes.join(', ') + argType)
+                     }
+                     argTypes.push(argType)
+                  }
+               }
+               if (argTypes.length === 0) {
+                  throw TypeError('Type inference failed for' + name)
+               }
+               let usedConversions = false
+               let instantiateFor = self.joinTypes(argTypes)
                if (instantiateFor === 'any') {
-                  throw TypeError(
-                     `In call to ${name}, no type unifies arguments `
-                        + args.toString() + '; of types ' + argTypes.toString()
-                        + '; note each consecutive pair must unify to a '
-                        + 'supertype of at least one of them')
-               }
-            }
-            const depth = instantiateFor.split('<').length
-            if (depth > self._maxDepthSeen) {
-               self._maxDepthSeen = depth
-            }
-            /* Generate the list of actual wanted types */
-            const wantTypes = parTypes.map(type => substituteInSig(
-               type, theTemplateParam, instantiateFor))
-            /* Now we have to add any actual types that are relevant
-             * to this invocation. Namely, that would be every formal parameter
-             * type in the invocation, with the parameter template instantiated
-             * by instantiateFor, and for all of instantiateFor's "prior types"
-             */
-            for (j = 0; j < parTypes.length; ++j) {
-               if (wantTypes[j] !== parTypes[j] && parTypes[j].includes('<')) {
-                  // actually used the param and is a template
-                  self._ensureTemplateTypes(parTypes[j], instantiateFor)
-               }
-            }
-            /* Transform the arguments if we used any conversions: */
-            if (usedConversions) {
-               i = - 1
-               for (j = 0; j < args.length; ++j) {
-                  if (i < parTypes.length - 1) ++i
-                  let wantType = parTypes[i]
-                  if (wantType.slice(0,3) === '...') {
-                     wantType = wantType.slice(3)
-                  }
-                  wantType = substituteInSig(
-                     wantType, theTemplateParam, instantiateFor)
-                  if (wantType !== parTypes[i]) {
-                     args[j] = self._typed.convert(args[j], wantType)
+                  usedConversions = true
+                  instantiateFor = self.joinTypes(argTypes, usedConversions)
+                  if (instantiateFor === 'any') {
+                     throw TypeError(
+                        `In call to ${name}, no type unifies arguments `
+                           + args.toString() + '; of types ' + argTypes.toString()
+                           + '; note each consecutive pair must unify to a '
+                           + 'supertype of at least one of them')
                   }
                }
-            }
-            /* Finally reassemble the rest args if there were any */
-            if (restParam) {
-               const restArgs = args.slice(regLength)
-               args = args.slice(0,regLength)
-               args.push(restArgs)
-            }
-            /* Arrange that the desired instantiation will be there next
-             * time so we don't have to go through that again for this type
-             */
-            refs[theTemplateParam] = instantiateFor
-            behavior.instantiations.add(instantiateFor)
-            self._invalidate(name)
-            // And update refs because we now know the type we're instantiating
-            // for:
-            const innerRefs = {}
-            for (const dep in simplifiedUses) {
-               const simplifiedDep = simplifiedUses[dep]
-               if (dep === simplifiedDep) {
-                  innerRefs[dep] = refs[dep]
-               } else {
-                  let [func, needsig] = dep.split(/[()]/)
-                  if (self._typed.isTypedFunction(refs[simplifiedDep])) {
-                     const subsig = substituteInSig(
-                        needsig, theTemplateParam, instantiateFor)
-                     let resname = simplifiedDep
-                     if (resname == 'self') resname = name
-                     innerRefs[dep] = self._pocoresolve(
-                        resname, subsig, refs[simplifiedDep])
-                  } else {
-                     innerRefs[dep] = refs[simplifiedDep]
+               const depth = instantiateFor.split('<').length
+               if (depth > self._maxDepthSeen) {
+                  self._maxDepthSeen = depth
+               }
+               /* Generate the list of actual wanted types */
+               const wantTypes = parTypes.map(type => substituteInSignature(
+                  type, theTemplateParam, instantiateFor))
+               const wantSig = wantTypes.join(',')
+               /* Now we have to add any actual types that are relevant
+                * to this invocation. Namely, that would be every formal
+                * parameter type in the invocation, with the parameter
+                * template instantiated by instantiateFor, and for all of
+                * instantiateFor's "prior types"
+                */
+               for (j = 0; j < parTypes.length; ++j) {
+                  if (wantTypes[j] !== parTypes[j] && parTypes[j].includes('<')) {
+                     // actually used the param and is a template
+                     self._ensureTemplateTypes(parTypes[j], instantiateFor)
                   }
                }
+
+               /* Request the desired instantiation: */
+               // But possibly since this resolution was grabbed, the proper
+               // instantiation has been added (like if there are multiple
+               // uses in the implementation of another method.
+               if (!(behavior.needsInstantiations.has(instantiateFor))) {
+                  behavior.needsInstantiations.add(instantiateFor)
+                  self._invalidate(name)
+               }
+               const brandNewMe = self[name]
+               const whatToDo = self._typed.resolve(brandNewMe, args)
+               // We can access return type information here
+               // And in particular, if it might be a template, we should try to
+               // instantiate it:
+               const returnType = returnTypeOf(whatToDo.fn, wantSig, self)
+               for (const possibility of returnType.split('|')) {
+                  const instantiated = self._maybeInstantiate(possibility)
+                  if (instantiated) {
+                     const [tempBase] = splitTemplate(instantiated)
+                     self._invalidateDependents(':' + tempBase)
+                  }
+               }
+               if (whatToDo === lastWhatToDo) {
+                  throw new Error(
+                     `Infinite recursion in resolving $name called on`
+                        + args.map(x => x.toString()).join(','))
+               }
+               lastWhatToDo = whatToDo
+               const retval = whatToDo.implementation(...args)
+               lastWhatToDo = null
+               return retval
             }
-            // Finally ready to make the call.
-            return behavior.does(innerRefs)(...args)
+            Object.defineProperty(
+               patchFunc, 'name', {value: `${name}(${signature})`})
+            patchFunc._pocoSignature = rawSignature
+            return patchFunc
          }
-         // The actual uses value needs to be a set:
-         const outerUses = new Set(Object.values(simplifiedUses))
+         Object.defineProperty(
+            patch, 'name', {value: `generate[${name}(${signature})]`})
+         // TODO?: Decorate patch with a function that calculates the
+         // correct return type a priori. Deferring because unclear what
+         // aspects will be merged into typed-function.
          this._addTFimplementation(
-            tf_imps, signature, {uses: outerUses, does: patch})
+            meta_imps, signature, {uses: new Set(), does: patch})
+         behavior.resolved = true
       }
       this._correctPartialSelfRefs(name, tf_imps)
       // Make sure we have all of the needed (template) types; and if they
@@ -820,35 +1098,140 @@ export default class PocomathInstance {
       const badSigs = new Set()
       for (const sig in tf_imps) {
          for (const type of typeListOfSignature(sig)) {
-            if (type.includes('<')) {
-               // it's a template type, turn it into a template and an arg
-               let base = type.split('<',1)[0]
-               const arg = type.slice(base.length+1, -1)
-               if (base.slice(0,3) === '...') {
-                  base = base.slice(3)
-               }
-               if (this.instantiateTemplate(base, arg) === undefined) {
-                  badSigs.add(sig)
-               }
+            if (this._maybeInstantiate(type) === undefined) {
+               badSigs.add(sig)
             }
          }
       }
       for (const badSig of badSigs) {
+         const imp = tf_imps[badSig]
          delete tf_imps[badSig]
+         const fromBehavior = this._imps[name][imp._pocoSignature]
+         if (fromBehavior.explicit) {
+            fromBehavior.resolved = false
+         } else {
+            delete fromBehavior.hasInstantiations[imp._pocoInstance]
+         }
       }
-      const tf = this._typed(name, tf_imps)
+      let tf
+      if (Object.keys(tf_imps).length > 0) {
+         tf = this._typed(name, tf_imps)
+         tf.fromInstance = this
+      }
+      let metaTF
+      if (Object.keys(meta_imps).length > 0) {
+         metaTF = this._metaTyped(name, meta_imps)
+         metaTF.fromInstance = this
+      }
+      this._meta[name] = metaTF
+
+      tf = tf || metaTF
       Object.defineProperty(this, name, {configurable: true, value: tf})
       return tf
    }
 
+   /* Takes a type and a set of types and returns true if the type
+    * is a subtype of some type in the set.
+    */
+   _atOrBelowSomeType(type, typeSet) {
+      if (typeSet.has(type)) return true
+      let belowSome = false
+      for (const anUB of typeSet) {
+         if (anUB in this.Templates) {
+            if (type.slice(0, anUB.length) === anUB) {
+               belowSome = true
+               break
+            }
+         } else {
+            if (this.isSubtypeOf(type, anUB)) {
+               belowSome = true
+               break
+            }
+         }
+      }
+      return belowSome
+   }
+
+   /* Takes an arbitrary type and performs an instantiation if necessary.
+    * @param {string} type  The type to instantiate
+    * @param {string | bool | undefined }
+    *     Returns the name of the type if an instantiation occurred, false
+    *     if the type was already present, and undefined if the type can't
+    *     be satisfied (because it is not the name of a type or it is nested
+    *     too deep.
+    */
+   _maybeInstantiate(type) {
+      if (type.slice(0,3) === '...') {
+         type = type.slice(3)
+      }
+      if (!(type.includes('<'))) {
+         // Not a template, so just check if type exists
+         if (type in this.Types) return false // already there
+         return undefined // no such type
+      }
+      // it's a template type, turn it into a template and an arg
+      let [base, arg] = splitTemplate(type)
+      return this.instantiateTemplate(base, arg)
+   }
+
+   /* Generate and include a template instantiation for operation name
+    * for the template signature templateSignature instantiated for
+    * instanceType, returning the resulting implementation.
+    */
+   _instantiateTemplateImplementation(name, templateSignature, instanceType) {
+      if (!(instanceType in this.Types)) return undefined
+      if (this.Types[instanceType] === anySpec) return undefined
+      const imps = this._imps[name]
+      const behavior = imps[templateSignature]
+      if (instanceType in behavior.hasInstantiations) return undefined
+      const signature = substituteInSignature(
+         templateSignature, theTemplateParam, instanceType)
+      /* Don't override an explicit implementation: */
+      if (signature in imps) return undefined
+      /* Don't go too deep */
+      let maxdepth = 0
+      for (const argType in typeListOfSignature(signature)) {
+         const depth = argType.split('<').length
+         if (depth > maxdepth) maxdepth = depth
+      }
+      if (maxdepth > this._maxDepthSeen + 1) return undefined
+      /* All right, go ahead and instantiate */
+      const uses = new Set()
+      for (const dep of behavior.uses) {
+         if (this._templateParam(dep)) continue
+         uses.add(substituteInSignature(dep, theTemplateParam, instanceType))
+      }
+      const patch = (refs) => {
+         const innerRefs = {}
+         for (const dep of behavior.uses) {
+            if (this._templateParam(dep)) {
+               innerRefs[dep] = instanceType
+            } else {
+               const outerName = substituteInSignature(
+                  dep, theTemplateParam, instanceType)
+               innerRefs[dep] = refs[outerName]
+            }
+         }
+         return behavior.does(innerRefs)
+      }
+      const tf_imps = this._TFimps[name]
+      this._addTFimplementation(tf_imps, signature, {uses, does: patch})
+      tf_imps[signature]._pocoSignature = templateSignature
+      tf_imps[signature]._pocoInstance = instanceType
+      behavior.hasInstantiations[instanceType] = signature
+      return tf_imps[signature]
+   }
+
    /* Adapts Pocomath-style behavior specification (uses, does) for signature
-    * to typed-function implementations and inserts the result into plain object
-    * imps
+    * to typed-function implementations and inserts the result into plain
+    * object imps
     */
    _addTFimplementation(imps, signature, behavior) {
       const {uses, does} = behavior
       if (uses.length === 0) {
-         imps[signature] = does()
+         const implementation = does()
+         // could do something with return type information here
+         imps[signature] = implementation
          return
       }
       const refs = {}
@@ -860,7 +1243,7 @@ export default class PocomathInstance {
           * Verify that the desired signature has been fully grounded:
           */
          if (needsig) {
-            const trysig = substituteInSig(needsig, theTemplateParam, '')
+            const trysig = substituteInSignature(needsig, theTemplateParam, '')
             if (trysig !== needsig) {
                throw new Error(
                   'Attempt to add a template implementation: ' +
@@ -869,13 +1252,23 @@ export default class PocomathInstance {
          }
          if (func === 'self') {
             if (needsig) {
-               if (full_self_referential) {
-                  throw new SyntaxError(
-                     'typed-function does not support mixed full and '
-                        + 'partial self-reference')
-               }
-               if (subsetOfKeys(typesOfSignature(needsig), this.Types)) {
-                  part_self_references.push(needsig)
+               /* Maybe we can resolve the self reference without troubling
+                * typed-function:
+                */
+               if (needsig in imps && typeof imps[needsig] == 'function') {
+                  refs[dep] = imps[needsig]
+               } else {
+                  if (full_self_referential) {
+                     throw new SyntaxError(
+                        'typed-function does not support mixed full and '
+                           + 'partial self-reference')
+                  }
+                  const needTypes = typesOfSignature(needsig)
+                  const mergedTypes = Object.assign(
+                     {}, this.Types, this.Templates)
+                  if (subsetOfKeys(needTypes, mergedTypes)) {
+                     part_self_references.push(needsig)
+                  }
                }
             } else {
                if (part_self_references.length) {
@@ -887,19 +1280,50 @@ export default class PocomathInstance {
             }
          } else {
             if (this[func] === 'limbo') {
-               /* We are in the midst of bundling func, so have to use
-                * an indirect reference to func. And given that, there's
-                * really no helpful way to extract a specific signature
+               /* We are in the midst of bundling func */
+               let fallback =  true
+               /* So the first thing we can do is try the tf_imps we are
+                * accumulating:
                 */
-               const self = this
-               refs[dep] = function () { // is this the most efficient?
-                  return self[func].apply(this, arguments)
+               if (needsig) {
+                  let typedUniverse
+                  let tempTF
+                  if (Object.keys(this._TFimps[func]).length > 0) {
+                     typedUniverse = this._typed
+                     tempTF = typedUniverse('dummy_' + func, this._TFimps[func])
+                  } else {
+                     typedUniverse = this._metaTyped
+                     tempTF = typedUniverse(
+                        'dummy_' + func, this._metaTFimps[func])
+                  }
+                  let result = undefined
+                  try {
+                     result = typedUniverse.find(tempTF, needsig, {exact: true})
+                  } catch {}
+                  if (result) {
+                     refs[dep] = result
+                     fallback = false
+                  }
+               }
+               if (fallback) {
+                  /* Either we need the whole function or the signature
+                   * we need is not available yet, so we have to use
+                   * an indirect reference to func. And given that, there's
+                   * really no helpful way to extract a specific signature
+                   */
+                  const self = this
+                  const redirect = function () { // is this the most efficient?
+                     return self[func].apply(this, arguments)
+                  }
+                  Object.defineProperty(redirect, 'name', {value: func})
+                  Object.defineProperty(redirect, 'fromInstance', {value: this})
+                  refs[dep] = redirect
                }
             } else {
                // can bundle up func, and grab its signature if need be
                let destination = this[func]
-               if (destination &&needsig) {
-                  destination = this._pocoresolve(func, needsig)
+               if (destination && needsig) {
+                  destination = this.resolve(func, needsig)
                }
                refs[dep] = destination
             }
@@ -908,7 +1332,11 @@ export default class PocomathInstance {
       if (full_self_referential) {
          imps[signature] = this._typed.referToSelf(self => {
             refs.self = self
-            return does(refs)
+            const implementation = does(refs)
+            Object.defineProperty(implementation, 'name', {value: does.name})
+            implementation.fromInstance = this
+            // What are we going to do with the return type info in here?
+            return implementation
          })
          return
       }
@@ -924,48 +1352,88 @@ export default class PocomathInstance {
             deferred: true,
             builtRefs: refs,
             sigDoes: does,
+            fromInstance: this,
             psr: part_self_references
          }
          return
       }
-      imps[signature] = does(refs)
+      const implementation = does(refs)
+      implementation.fromInstance = this
+      // could do something with return type information here?
+      imps[signature] = implementation
    }
 
    _correctPartialSelfRefs(name, imps) {
       for (const aSignature in imps) {
          if (!(imps[aSignature].deferred)) continue
-         const part_self_references = imps[aSignature].psr
+         const deferral = imps[aSignature]
+         const part_self_references = deferral.psr
          const corrected_self_references = []
+         const remaining_self_references = []
+         const refs = deferral.builtRefs
          for (const neededSig of part_self_references) {
             // Have to find a match for neededSig among the other signatures
             // of this function. That's a job for typed-function, but we will
             // try here:
             if (neededSig in imps) { // the easy case
                corrected_self_references.push(neededSig)
+               remaining_self_references.push(neededSig)
                continue
             }
             // No exact match, try to get one that matches with
             // subtypes since the whole conversion thing in typed-function
             // is too complicated to reproduce
-            const foundSig = this._findSubtypeImpl(name, imps, neededSig)
+            let foundSig = this._findSubtypeImpl(name, imps, neededSig)
             if (foundSig) {
                corrected_self_references.push(foundSig)
+               remaining_self_references.push(neededSig)
             } else {
-               throw new Error(
-                  'Implement inexact self-reference in typed-function for '
-                     + `${name}(${neededSig})`)
+               // Maybe it's a template instance we don't yet have
+               foundSig = this._findSubtypeImpl(
+                  name, this._imps[name], neededSig)
+               if (foundSig) {
+                  const match = this._pocoFindSignature(name, neededSig)
+                  const neededTemplate = match.fn._pocoSignature
+                  const neededInstance = whichSigInstance(
+                     neededSig, neededTemplate)
+                  const neededImplementation =
+                     this._instantiateTemplateImplementation(
+                        name, neededTemplate, neededInstance)
+                  if (!neededImplementation) {
+                     refs[`self(${neededSig})`] = match.implementation
+                  } else {
+                     if (typeof neededImplementation === 'function') {
+                        refs[`self(${neededSig})`] = neededImplementation
+                     } else {
+                        corrected_self_references.push(neededSig)
+                        remaining_self_references.push(neededSig)
+                     }
+                  }
+               } else {
+                  throw new Error(
+                     'Implement inexact self-reference in typed-function for '
+                        + `${name}(${neededSig})`)
+               }
             }
          }
-         const refs = imps[aSignature].builtRefs
-         const does = imps[aSignature].sigDoes
-         imps[aSignature] = this._typed.referTo(
-            ...corrected_self_references, (...impls) => {
-               for (let i = 0; i < part_self_references.length; ++i) {
-                  refs[`self(${part_self_references[i]})`] = impls[i]
+         const does = deferral.sigDoes
+         if (remaining_self_references.length > 0) {
+            imps[aSignature] = this._typed.referTo(
+               ...corrected_self_references, (...impls) => {
+                  for (let i = 0; i < remaining_self_references.length; ++i) {
+                     refs[`self(${remaining_self_references[i]})`] = impls[i]
+                  }
+                  const implementation = does(refs)
+                  // What will we do with the return type info in here?
+                  return implementation
                }
-               return does(refs)
-            }
-         )
+            )
+         } else {
+            imps[aSignature] = does(refs)
+         }
+         imps[aSignature]._pocoSignature = deferral._pocoSignature
+         imps[aSignature]._pocoInstance = deferral._pocoInstance
+         imps[aSignature].fromInstance = deferral.fromInstance
       }
    }
 
@@ -974,8 +1442,7 @@ export default class PocomathInstance {
     * in the instance.
     */
    _ensureTemplateTypes(template, type) {
-      const base = template.split('<', 1)[0]
-      const arg = template.slice(base.length + 1, -1)
+      const [base, arg] = splitTemplate(template)
       if (!arg) {
          throw new Error(
             'Implementation error in _ensureTemplateTypes', template, type)
@@ -995,12 +1462,13 @@ export default class PocomathInstance {
       return resultingTypes
    }
 
-   /* Maybe add the instantiation of template type base with argument tyoe
-    * instantiator to the Types of this instance, if it hasn't happened already.
+   /* Maybe add the instantiation of template type base with argument type
+    * instantiator to the Types of this instance, if it hasn't happened
+    * already.
     * Returns the name of the type if added, false if it was already there,
     * and undefined if the type is declined (because of being nested too deep).
     */
-   instantiateTemplate(base, instantiator) {
+   instantiateTemplate = Returns('void', function(base, instantiator) {
       const depth = instantiator.split('<').length
       if (depth > this._maxDepthSeen ) {
          // don't bother with types much deeper thant we have seen
@@ -1010,7 +1478,7 @@ export default class PocomathInstance {
       if (wantsType in this.Types) return false
       // OK, need to generate the type from the template
       // Set up refines, before, test, and from
-      const newTypeSpec = {refines: base}
+      const newTypeSpec = {}
       const maybeFrom = {}
       const template = this.Templates[base].spec
       if (!template) {
@@ -1018,6 +1486,11 @@ export default class PocomathInstance {
             `Implementor error in instantiateTemplate(${base}, ${instantiator})`)
       }
       const instantiatorSpec = this.Types[instantiator]
+      if (instantiatorSpec.refines) {
+         this.instantiateTemplate(base, instantiatorSpec.refines)
+         // Assuming our templates are covariant, I guess
+         newTypeSpec.refines = `${base}<${instantiatorSpec.refines}>`
+      }
       let beforeTypes = []
       if (instantiatorSpec.before) {
          beforeTypes = instantiatorSpec.before.map(type => `${base}<${type}>`)
@@ -1025,36 +1498,35 @@ export default class PocomathInstance {
       if (template.before) {
          for (const beforeTmpl of template.before) {
             beforeTypes.push(
-               substituteInSig(beforeTmpl, theTemplateParam, instantiator))
+               substituteInSignature(beforeTmpl, theTemplateParam, instantiator))
          }
       }
       if (beforeTypes.length > 0) {
          newTypeSpec.before = beforeTypes
       }
-      newTypeSpec.test = template.test(this._typeTests[instantiator])
+      const templateTest = template.test(this._typeTests[instantiator])
+      newTypeSpec.test = x => (template.base(x) && templateTest(x))
       if (template.from) {
          for (let source in template.from) {
-            const instSource = substituteInSig(
+            const instSource = substituteInSignature(
                source, theTemplateParam, instantiator)
-            let usesFromParam = false
-            for (const word of instSource.split(/[<>]/)) {
-               if (word === templateFromParam) {
-                  usesFromParam = true
-                  break
-               }
-            }
+            const testSource = substituteInSignature(
+               instSource, templateFromParam, instantiator)
+            const usesFromParam = (testSource !== instSource)
             if (usesFromParam) {
                for (const iFrom in instantiatorSpec.from) {
-                  const finalSource = substituteInSig(
+                  const finalSource = substituteInSignature(
                      instSource, templateFromParam, iFrom)
                   maybeFrom[finalSource] = template.from[source](
                      instantiatorSpec.from[iFrom])
                }
-               // Assuming all templates are covariant here, I guess...
-               for (const subType of this._subtypes[instantiator]) {
-                  const finalSource = substituteInSig(
-                     instSource, templateFromParam, subType)
-                  maybeFrom[finalSource] = template.from[source](x => x)
+               if (testSource !== wantsType) { // subtypes handled with refines
+                  // Assuming all templates are covariant here, I guess...
+                  for (const subType of this._subtypes[instantiator]) {
+                     const finalSource = substituteInSignature(
+                        instSource, templateFromParam, subType)
+                     maybeFrom[finalSource] = template.from[source](x => x)
+                  }
                }
             } else {
                maybeFrom[instSource] = template.from[source]
@@ -1066,8 +1538,9 @@ export default class PocomathInstance {
          newTypeSpec.from = maybeFrom
       }
       this.installType(wantsType, newTypeSpec)
+      this._instantiationsOf[base].add(wantsType)
       return wantsType
-   }
+   })
 
    _findSubtypeImpl(name, imps, neededSig) {
       if (neededSig in imps) return neededSig
@@ -1077,42 +1550,48 @@ export default class PocomathInstance {
          const otherTypeList = typeListOfSignature(otherSig)
          if (typeList.length !== otherTypeList.length) continue
          let allMatch = true
+         let paramBound = 'any'
          for (let k = 0; k < typeList.length; ++k) {
             let myType = typeList[k]
             let otherType = otherTypeList[k]
             if (otherType === theTemplateParam) {
-               otherTypeList[k] = 'ground'
-               otherType = 'ground'
+               otherTypeList[k] = paramBound
+               otherType = paramBound
             }
-            if (otherType === '...T') {
-               otherTypeList[k] = '...ground'
-               otherType = 'ground'
+            if (otherType === restTemplateParam) {
+               otherTypeList[k] = `...${paramBound}`
+               otherType = paramBound
             }
-            const adjustedOtherType = otherType.replaceAll(
-               `<${theTemplateParam}>`, '')
+            const adjustedOtherType = otherType.replaceAll(templateCall, '')
             if (adjustedOtherType !== otherType) {
                otherTypeList[k] = adjustedOtherType
                otherType = adjustedOtherType
             }
             if (myType.slice(0,3) === '...') myType = myType.slice(3)
             if (otherType.slice(0,3) === '...') otherType = otherType.slice(3)
+            const otherBound = upperBounds.exec(otherType)
+            if (otherBound) {
+               paramBound = otherBound[2]
+               otherType = paramBound
+               otherTypeList[k] = otherBound[1].replaceAll(
+                  theTemplateParam, paramBound)
+            }
             if (otherType === 'any') continue
-            if (otherType === 'ground') continue
-            if (!(otherType in this.Types)) {
-               allMatch = false
-               break
-            }
-            if (myType === otherType
-                || this._subtypes[otherType].has(myType)) {
-               continue
-            }
+            if (myType === otherType) continue
             if (otherType in this.Templates) {
+               const [myBase] = splitTemplate(myType)
+               if (myBase === otherType) continue
                if (this.instantiateTemplate(otherType, myType)) {
                   let dummy
                   dummy = this[name] // for side effects
                   return this._findSubtypeImpl(name, this._imps[name], neededSig)
                }
             }
+            if (!(otherType in this.Types)) {
+               allMatch = false
+               break
+            }
+            if (this.isSubtypeOf(myType, otherType)) continue
             allMatch = false
             break
          }
@@ -1124,28 +1603,96 @@ export default class PocomathInstance {
       return foundSig
    }
 
-   _pocoresolve(name, sig, typedFunction) {
+   _pocoFindSignature(name, sig, typedFunction) {
       if (!this._typed.isTypedFunction(typedFunction)) {
          typedFunction = this[name]
       }
-      let result = undefined
-      try {
-         result = this._typed.find(typedFunction, sig, {exact: true})
-      } catch {
+      const haveTF = this._typed.isTypedFunction(typedFunction)
+      if (haveTF) {
+         // First try a direct match
+         let result
+         try {
+            result = this._typed.findSignature(typedFunction, sig, {exact: true})
+         } catch {
+         }
+         if (result) return result
+         // Next, look ourselves but with subtypes:
+         const wantTypes = typeListOfSignature(sig)
+         for (const [implSig, details]
+              of typedFunction._typedFunctionData.signatureMap) {
+            let allMatched = true
+            const implTypes = typeListOfSignature(implSig)
+            for (let i = 0; i < wantTypes.length; ++i) {
+               const implIndex = Math.min(i, implTypes.length - 1)
+               let implType = implTypes[implIndex]
+               if (implIndex < i) {
+                  if (implType.slice(0,3) !== '...') {
+                     // ran out of arguments in impl
+                     allMatched = false
+                     break
+                  }
+               }
+               if (implType.slice(0,3) === '...') {
+                  implType = implType.slice(3)
+               }
+               const hasMatch = implType.split('|').some(
+                  t => (wantTypes[i] === t || this.isSubtypeOf(wantTypes[i], t)))
+               if (!hasMatch) {
+                  allMatched = false
+                  break
+               }
+            }
+            if (allMatched) return details
+         }
       }
-      if (result) return result
+      if (!(this._imps[name])) return undefined
       const foundsig = this._findSubtypeImpl(name, this._imps[name], sig)
-      if (foundsig) return this._typed.find(typedFunction, foundsig)
-      // Make sure bundle is up-to-date:
+      if (foundsig) {
+         if (haveTF) {
+            try {
+               return this._typed.findSignature(typedFunction, foundsig)
+            } catch {
+            }
+         }
+         try {
+            return this._metaTyped.findSignature(this._meta[name], foundsig)
+         } catch {
+         }
+         // We have an implementation but not a typed function. Do the best
+         // we can:
+         const foundImpl = this._imps[name][foundsig]
+         const needs = {}
+         for (const dep of foundImpl.uses) {
+            const [base, sig] = dep.split('()')
+            needs[dep] = this.resolve(base, sig)
+         }
+         const pseudoImpl = foundImpl.does(needs)
+         return {fn: pseudoImpl, implementation: pseudoImpl}
+      }
+      // Hmm, no luck. Make sure bundle is up-to-date and retry:
+      let result = undefined
       typedFunction = this[name]
       try {
-         result = this._typed.find(typedFunction, sig)
+         result = this._typed.findSignature(typedFunction, sig)
       } catch {
       }
-      if (result) return result
+      return result
+   }
+
+   /* Returns a function that implements the operation with the given name
+    * when called with the given signature. The optional third argument is
+    * the typed function that provides the operation name, which can be
+    * passed in for efficiency if it is already available.
+    */
+   resolve = Returns('function', function (name, sig, typedFunction) {
+      if (!this._typed.isTypedFunction(typedFunction)) {
+         typedFunction = this[name]
+      }
+      const result = this._pocoFindSignature(name, sig, typedFunction)
+      if (result) return result.implementation
       // total punt, revert to typed-function resolution on every call;
       // hopefully this happens rarely:
       return typedFunction
-   }
+   })
 
 }

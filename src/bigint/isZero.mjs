@@ -1,3 +1,4 @@
+import Returns from '../core/Returns.mjs'
 export * from './Types/bigint.mjs'
 
-export const isZero = {bigint: () => b => b === 0n}
+export const isZero = {bigint: () => Returns('boolean', b => b === 0n)}
