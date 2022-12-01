@@ -6,6 +6,7 @@ export * from './Types/number.mjs'
 export {abs} from './abs.mjs'
 export {absquare} from './absquare.mjs'
 export {add} from './add.mjs'
+export {cbrt} from './cbrt.mjs'
 export {compare} from './compare.mjs'
 export const conjugate = {'T:number': identitySubTypes('number')}
 export const gcd = gcdType('NumInt')

@@ -6,7 +6,7 @@ export function dependencyExtractor(destinationSet) {
    return new Proxy({}, {
       get: (target, property) => {
          destinationSet.add(property)
-         return {}
+         return {checkingDependency: true}
       }
    })
 }

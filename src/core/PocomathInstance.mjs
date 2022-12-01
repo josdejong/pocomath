@@ -7,6 +7,12 @@ import {typeListOfSignature, typesOfSignature, subsetOfKeys} from './utils.mjs'
 
 const anySpec = {} // fixed dummy specification of 'any' type
 
+/* Like `.some(predicate)` but for collections */
+function exists(collection, predicate) {
+   for (const item of collection) if (predicate(item)) return true;
+   return false;
+}
+
 /* Template/signature parsing stuff; should probably be moved to a
  * separate file, but it's a bit interleaved at the moment
  */
@@ -87,6 +93,7 @@ function substituteInSignature(signature, parameter, type) {
    return sig.replaceAll(pattern, type)
 }
 
+const UniversalType = 'ground' // name for a type that matches anything
 let lastWhatToDo = null // used in an infinite descent check
 
 export default class PocomathInstance {
@@ -97,6 +104,7 @@ export default class PocomathInstance {
    static reserved = new Set([
       'chain',
       'config',
+      'convert',
       'importDependencies',
       'install',
       'installType',
@@ -128,16 +136,30 @@ export default class PocomathInstance {
       // its onMismatch function, below:
       this._metaTyped = typed.create()
       this._metaTyped.clear()
+      this._metaTyped.addTypes([{name: UniversalType, test: () => true}])
+
       // And these are the meta bindings: (I think we don't need separate
       // invalidation for them as they are only accessed through a main call.)
       this._meta = {} // The resulting typed-functions
       this._metaTFimps = {} // and their implementations
       const me = this
-      const myTyped = this._typed
       this._typed.onMismatch = (name, args, sigs) => {
          if (me._invalid.has(name)) {
+            if (this._fixing === name) {
+               this._fixingCount += 1
+               if (this._fixingCount > this._maxDepthSeen + 2) {
+                  throw new ReferenceError(
+                     `Infinite descent rebuilding ${name} on ${args}`)
+               }
+            } else {
+               this._fixingCount = 0
+            }
             // rebuild implementation and try again
-            return me[name](...args)
+            const lastFixing = this._fixing
+            this._fixing = name
+            const value = me[name](...args)
+            this._fix = lastFixing
+            return value
          }
          const metaversion = me._meta[name]
          if (metaversion) {
@@ -183,6 +205,8 @@ export default class PocomathInstance {
       this._plainFunctions = new Set() // the names of the plain functions
       this._chainRepository = {} // place to store chainified functions
       this.joinTypes = this.joinTypes.bind(me)
+      // Provide access to typed function conversion:
+      this.convert = this._typed.convert.bind(this._typed)
    }
 
    /**
@@ -523,6 +547,10 @@ export default class PocomathInstance {
             }
          }
       }
+      // Need to metafy ground types
+      if (type === base) {
+         this._metafy(type)
+      }
       // update the typeOf function
       const imp = {}
       imp[type] = {uses: new Set(), does: () => Returns('string', () => type)}
@@ -640,7 +668,7 @@ export default class PocomathInstance {
       }
 
       // install the "base type" in the meta universe:
-      let beforeType = 'any'
+      let beforeType = UniversalType
       for (const other of spec.before || []) {
          if (other in this.templates) {
             beforeType = other
@@ -648,6 +676,13 @@ export default class PocomathInstance {
          }
       }
       this._metaTyped.addTypes([{name: base, test: spec.base}], beforeType)
+      // Add conversions to the base type:
+      if (spec.from && spec.from[theTemplateParam]) {
+         for (const ground of this._metafiedTypes) {
+            this._metaTyped.addConversion(
+               {from: ground, to: base, convert: spec.from[theTemplateParam]})
+         }
+      }
       this._instantiationsOf[base] = new Set()
 
       // update the typeOf function
@@ -750,45 +785,39 @@ export default class PocomathInstance {
    /**
     * Reset an operation to require creation of typed-function,
     * and if it has no implementations so far, set them up.
+    * name is the name of the operation, badType is a type that has been
+    * invalidated, and reasons is a set of specific operations/signatures
+    * that have been invalidated
     */
-   _invalidate(name, reason) {
+   _invalidate(name, badType = '', reasons = new Set()) {
       if (!(name in this._imps)) {
          this._imps[name] = {}
          this._TFimps[name] = {}
          this._metaTFimps[name] = {}
       }
-      if (reason) {
-         // Make sure no TF imps that depend on reason remain:
-         for (const [signature, behavior] of Object.entries(this._imps[name])) {
-            let invalidated = false
-            if (reason.charAt(0) === ':') {
-               const badType = reason.slice(1)
-               if (signature.includes(badType)) invalidated = true
+      // Go through each TF imp and invalidate it if need be
+      for (const [signature, imp] of Object.entries(this._TFimps[name])) {
+         if (imp.deferred
+             || (badType && signature.includes(badType))
+             || exists(imp.uses, dep => {
+                const [func, sig] = dep.split(/[()]/)
+                return reasons.has(dep)
+                   || (reasons.has(func) && !(sig in this._TFimps[func]))
+             })) {
+            // Invalidate this implementation:
+            delete this._TFimps[name][signature]
+            const behavior = imp.fromBehavior
+            if (behavior.explicit) {
+               behavior.resolved = false
             } else {
-               for (const dep of behavior.uses) {
-                  if (dep.includes(reason)) {
-                     invalidated = true
-                     break
-                  }
-               }
+               delete behavior.hasInstantiations[imp.instance]
             }
-            if (invalidated) {
-               if (behavior.explicit) {
-                  if (behavior.resolved) delete this._TFimps[signature]
-                  behavior.resolved = false
-               } else {
-                  for (const fullSig
-                       of Object.values(behavior.hasInstantiations)) {
-                     delete this._TFimps[fullSig]
-                  }
-                  behavior.hasInstantiations = {}
-               }
-            }
+            reasons.add(`${name}(${signature})`)
          }
       }
       if (this._invalid.has(name)) return
       this._invalid.add(name)
-      this._invalidateDependents(name)
+      this._invalidateDependents(name, badType, reasons)
       const self = this
       Object.defineProperty(this, name, {
          configurable: true,
@@ -802,11 +831,14 @@ export default class PocomathInstance {
 
    /**
     * Invalidate all the dependents of a given property of the instance
+    * reasons is a set of invalidated signatures
     */
-   _invalidateDependents(name) {
+   _invalidateDependents(name, badType, reasons = new Set()) {
+      if (name.charAt(0) === ':') badType = name.slice(1)
+      else reasons.add(name)
       if (name in this._affects) {
          for (const ancestor of this._affects[name]) {
-            this._invalidate(ancestor, name)
+            this._invalidate(ancestor, badType, reasons)
          }
       }
    }
@@ -847,7 +879,7 @@ export default class PocomathInstance {
       for (const [rawSignature, behavior] of usableEntries) {
          if (behavior.explicit) {
             if (!(behavior.resolved)) {
-               this._addTFimplementation(tf_imps, rawSignature, behavior)
+               this._addTFimplementation(name, tf_imps, rawSignature, behavior)
                tf_imps[rawSignature]._pocoSignature = rawSignature
                behavior.resolved = true
             }
@@ -867,11 +899,18 @@ export default class PocomathInstance {
          }
          /* First, add the known instantiations, gathering all types needed */
          if (ubType) behavior.needsInstantiations.add(ubType)
+         const nargs = typeListOfSignature(rawSignature).length
          let instantiationSet = new Set()
          const ubTypes = new Set()
          if (!ubType) {
             // Collect all upper-bound types for this signature
             for (const othersig in imps) {
+               const otherNargs = typeListOfSignature(othersig).length
+               if (nargs !== otherNargs) {
+                  // crude criterion that it won't match, that ignores
+                  // rest args, but hopefully OK for prototype
+                  continue
+               }
                const thisUB = upperBounds.exec(othersig)
                if (thisUB) ubTypes.add(thisUB[2])
                let basesig = othersig.replaceAll(templateCall, '')
@@ -881,7 +920,7 @@ export default class PocomathInstance {
                      basesig, theTemplateParam, '')
                   if (testsig === basesig) {
                      // that is not also top-level
-                     for (const templateType of typeListOfSignature(basesig)) {
+                     for (let templateType of typeListOfSignature(basesig)) {
                         if (templateType.slice(0,3) === '...') {
                            templateType = templateType.slice(3)
                         }
@@ -894,21 +933,20 @@ export default class PocomathInstance {
          for (const instType of behavior.needsInstantiations) {
             instantiationSet.add(instType)
             const otherTypes =
-                  ubType ? this.subtypesOf(instType) : this._priorTypes[instType]
+               ubType ? this.subtypesOf(instType) : this._priorTypes[instType]
             for (const other of otherTypes) {
                if (!(this._atOrBelowSomeType(other, ubTypes))) {
                   instantiationSet.add(other)
                }
             }
          }
-
          /* Prevent other existing signatures from blocking use of top-level
           * templates via conversions:
           */
          let baseSignature = rawSignature.replaceAll(templateCall, '')
          /* Any remaining template params are top-level */
          const signature = substituteInSignature(
-            baseSignature, theTemplateParam, 'any')
+            baseSignature, theTemplateParam, UniversalType)
          const hasTopLevel = (signature !== baseSignature)
          if (!ubType && hasTopLevel) {
             for (const othersig in imps) {
@@ -939,9 +977,9 @@ export default class PocomathInstance {
                }
             }
          }
-
          for (const instType of instantiationSet) {
-            this._instantiateTemplateImplementation(name, rawSignature, instType)
+            this._instantiateTemplateImplementation(
+               name, rawSignature, instType)
          }
          /* Now add the catchall signature */
          /* (Not needed if if it's a bounded template) */
@@ -996,6 +1034,7 @@ export default class PocomathInstance {
                            `Type inference failed for argument ${j} of ${name}`)
                      }
                      if (argType === 'any') {
+                        console.log('INCOMPATIBLE ARGUMENTS are', args)
                         throw TypeError(
                            `In call to ${name}, `
                               + 'incompatible template arguments:'
@@ -1018,9 +1057,10 @@ export default class PocomathInstance {
                   usedConversions = true
                   instantiateFor = self.joinTypes(argTypes, usedConversions)
                   if (instantiateFor === 'any') {
+                     let argDisplay = args.map(toString).join(', ')
                      throw TypeError(
                         `In call to ${name}, no type unifies arguments `
-                           + args.toString() + '; of types ' + argTypes.toString()
+                           + argDisplay + '; of types ' + argTypes.toString()
                            + '; note each consecutive pair must unify to a '
                            + 'supertype of at least one of them')
                   }
@@ -1042,7 +1082,9 @@ export default class PocomathInstance {
                for (j = 0; j < parTypes.length; ++j) {
                   if (wantTypes[j] !== parTypes[j] && parTypes[j].includes('<')) {
                      // actually used the param and is a template
-                     self._ensureTemplateTypes(parTypes[j], instantiateFor)
+                     const strippedType = parTypes[j].substr(
+                        parTypes[j].lastIndexOf('.') + 1)
+                     self._ensureTemplateTypes(strippedType, instantiateFor)
                   }
                }
 
@@ -1050,12 +1092,19 @@ export default class PocomathInstance {
                // But possibly since this resolution was grabbed, the proper
                // instantiation has been added (like if there are multiple
                // uses in the implementation of another method.
-               if (!(behavior.needsInstantiations.has(instantiateFor))) {
-                  behavior.needsInstantiations.add(instantiateFor)
+               let whatToDo
+               if (!(instantiateFor in behavior.hasInstantiations)) {
+                  const newImp = self._instantiateTemplateImplementation(
+                     name, rawSignature, instantiateFor)
+                  if (newImp) {
+                     whatToDo = {fn: newImp, implementation: newImp}
+                  }
                   self._invalidate(name)
                }
                const brandNewMe = self[name]
-               const whatToDo = self._typed.resolve(brandNewMe, args)
+               const betterToDo = self._typed.resolve(brandNewMe, args)
+               whatToDo = betterToDo || whatToDo
+
                // We can access return type information here
                // And in particular, if it might be a template, we should try to
                // instantiate it:
@@ -1069,8 +1118,13 @@ export default class PocomathInstance {
                }
                if (whatToDo === lastWhatToDo) {
                   throw new Error(
-                     `Infinite recursion in resolving $name called on`
-                        + args.map(x => x.toString()).join(','))
+                     `Infinite recursion in resolving ${name} called on `
+                        + args.map(x =>
+                           (typeof x === 'object'
+                            ? JSON.stringify(x)
+                            : x.toString())
+                        ).join(', ')
+                        + ` inferred to be ${wantSig}`)
                }
                lastWhatToDo = whatToDo
                const retval = whatToDo.implementation(...args)
@@ -1088,15 +1142,19 @@ export default class PocomathInstance {
          // correct return type a priori. Deferring because unclear what
          // aspects will be merged into typed-function.
          this._addTFimplementation(
-            meta_imps, signature, {uses: new Set(), does: patch})
+            name, meta_imps, signature,
+            {uses: new Set(), does: patch},
+            behavior)
          behavior.resolved = true
       }
-      this._correctPartialSelfRefs(name, tf_imps)
       // Make sure we have all of the needed (template) types; and if they
       // can't be added (because they have been instantiated too deep),
       // ditch the signature:
       const badSigs = new Set()
       for (const sig in tf_imps) {
+         if (!tf_imps[sig].uses) {
+            throw new ReferenceError(`MONKEY WRENCH: ${name} ${sig}`)
+         }
          for (const type of typeListOfSignature(sig)) {
             if (this._maybeInstantiate(type) === undefined) {
                badSigs.add(sig)
@@ -1117,11 +1175,13 @@ export default class PocomathInstance {
       if (Object.keys(tf_imps).length > 0) {
          tf = this._typed(name, tf_imps)
          tf.fromInstance = this
+         tf.isMeta = false
       }
       let metaTF
       if (Object.keys(meta_imps).length > 0) {
          metaTF = this._metaTyped(name, meta_imps)
          metaTF.fromInstance = this
+         metaTF.isMeta = true
       }
       this._meta[name] = metaTF
 
@@ -1215,10 +1275,12 @@ export default class PocomathInstance {
          return behavior.does(innerRefs)
       }
       const tf_imps = this._TFimps[name]
-      this._addTFimplementation(tf_imps, signature, {uses, does: patch})
+      this._addTFimplementation(
+         name, tf_imps, signature, {uses, does: patch}, behavior, instanceType)
       tf_imps[signature]._pocoSignature = templateSignature
       tf_imps[signature]._pocoInstance = instanceType
       behavior.hasInstantiations[instanceType] = signature
+      behavior.needsInstantiations.add(instanceType) // once we have it, keep it
       return tf_imps[signature]
    }
 
@@ -1226,17 +1288,23 @@ export default class PocomathInstance {
     * to typed-function implementations and inserts the result into plain
     * object imps
     */
-   _addTFimplementation(imps, signature, behavior) {
-      const {uses, does} = behavior
+   _addTFimplementation(
+      name, imps, signature, specificBehavior, fromImp, asInstance)
+   {
+      if (!fromImp) fromImp = specificBehavior
+      const {uses, does} = specificBehavior
       if (uses.length === 0) {
          const implementation = does()
+         implementation.uses = uses
+         implementation.fromInstance = this
+         implementation.fromBehavior = fromImp
+         implementation.instance = asInstance
          // could do something with return type information here
          imps[signature] = implementation
          return
       }
       const refs = {}
       let full_self_referential = false
-      let part_self_references = []
       for (const dep of uses) {
          let [func, needsig] = dep.split(/[()]/)
          /* Safety check that can perhaps be removed:
@@ -1252,82 +1320,71 @@ export default class PocomathInstance {
          }
          if (func === 'self') {
             if (needsig) {
-               /* Maybe we can resolve the self reference without troubling
-                * typed-function:
+               /* We now resolve all specific-signature self references
+                * here, without resorting to the facility in typed-function:
                 */
                if (needsig in imps && typeof imps[needsig] == 'function') {
                   refs[dep] = imps[needsig]
+                  continue
+               }
+               const needTypes = typesOfSignature(needsig)
+               const mergedTypes = Object.assign(
+                  {}, this.Types, this.Templates)
+               if (subsetOfKeys(needTypes, mergedTypes)) {
+                  func = name // just resolve it in limbo
                } else {
-                  if (full_self_referential) {
-                     throw new SyntaxError(
-                        'typed-function does not support mixed full and '
-                           + 'partial self-reference')
-                  }
-                  const needTypes = typesOfSignature(needsig)
-                  const mergedTypes = Object.assign(
-                     {}, this.Types, this.Templates)
-                  if (subsetOfKeys(needTypes, mergedTypes)) {
-                     part_self_references.push(needsig)
-                  }
+                  // uses an unknown type, so will get an undefined impl
+                  console.log(
+                     'WARNING: partial self-reference for', name, 'to',
+                     needsig, 'uses an unknown type')
+                  refs[dep] = undefined
+                  continue
                }
             } else {
-               if (part_self_references.length) {
-                  throw new SyntaxError(
-                     'typed-function does not support mixed full and '
-                        + 'partial self-reference')
-               }
                full_self_referential = true
-            }
-         } else {
-            if (this[func] === 'limbo') {
-               /* We are in the midst of bundling func */
-               let fallback =  true
-               /* So the first thing we can do is try the tf_imps we are
-                * accumulating:
-                */
-               if (needsig) {
-                  let typedUniverse
-                  let tempTF
-                  if (Object.keys(this._TFimps[func]).length > 0) {
-                     typedUniverse = this._typed
-                     tempTF = typedUniverse('dummy_' + func, this._TFimps[func])
-                  } else {
-                     typedUniverse = this._metaTyped
-                     tempTF = typedUniverse(
-                        'dummy_' + func, this._metaTFimps[func])
-                  }
-                  let result = undefined
-                  try {
-                     result = typedUniverse.find(tempTF, needsig, {exact: true})
-                  } catch {}
-                  if (result) {
-                     refs[dep] = result
-                     fallback = false
-                  }
-               }
-               if (fallback) {
-                  /* Either we need the whole function or the signature
-                   * we need is not available yet, so we have to use
-                   * an indirect reference to func. And given that, there's
-                   * really no helpful way to extract a specific signature
-                   */
-                  const self = this
-                  const redirect = function () { // is this the most efficient?
-                     return self[func].apply(this, arguments)
-                  }
-                  Object.defineProperty(redirect, 'name', {value: func})
-                  Object.defineProperty(redirect, 'fromInstance', {value: this})
-                  refs[dep] = redirect
-               }
-            } else {
-               // can bundle up func, and grab its signature if need be
-               let destination = this[func]
-               if (destination && needsig) {
-                  destination = this.resolve(func, needsig)
-               }
-               refs[dep] = destination
+               continue
             }
          }
+         if (this[func] === 'limbo') {
+            /* We are in the midst of bundling func (which may be ourself) */
+            /* So the first thing we can do is try the tf_imps we are
+             * accumulating:
+             */
+            if (needsig) {
+               const candidate = this.resolve(func, needsig)
+               if (typeof candidate === 'function') {
+                  refs[dep] = candidate
+                  continue
+               }
+            }
+            /* Either we need the whole function or the signature
+             * we need is not available yet, so we have to use
+             * an indirect reference to func. And given that, there's
+             * really no helpful way to extract a specific signature
+             */
+            const self = this
+            const redirect = function () { // is this the most efficient?
+               return self[func].apply(this, arguments)
+            }
+            Object.defineProperty(redirect, 'name', {value: func})
+            Object.defineProperty(redirect, 'fromInstance', {value: this})
+            refs[dep] = redirect
+            continue
+         }
+         // can bundle up func, and grab its signature if need be
+         let destination = this[func]
+         if (needsig) {
+            destination = this.resolve(func, needsig)
+         }
+         if (!destination) {
+            // Unresolved reference. This is allowed so that
+            // you can bundle up just some portions of the library,
+            // but let's warn.
+            console.log(
+               'WARNING: No definition found for dependency',
+               dep, 'needed by', name, '(', signature, ')')
+         }
+         refs[dep] = destination
       }
       if (full_self_referential) {
          imps[signature] = this._typed.referToSelf(self => {
@@ -1335,106 +1392,25 @@ export default class PocomathInstance {
             const implementation = does(refs)
             Object.defineProperty(implementation, 'name', {value: does.name})
             implementation.fromInstance = this
+            implementation.uses = uses
+            implementation.instance = asInstance
+            implementation.fromBehavior = fromImp
             // What are we going to do with the return type info in here?
             return implementation
          })
-         return
-      }
-      if (part_self_references.length) {
-         /* There is an obstruction here. The list part_self_references
-          * might contain a signature that requires conversion for self to
-          * handle. But I advocated this not be allowed in typed.referTo, which
-          * made sense for human-written functions, but is unfortunate now.
-          * So we have to defer creating these and correct them later, at
-          * least until we can add an option to typed-function.
-          */
-         imps[signature] = {
-            deferred: true,
-            builtRefs: refs,
-            sigDoes: does,
-            fromInstance: this,
-            psr: part_self_references
-         }
+         imps[signature].uses = uses
+         imps[signature].fromInstance = this
+         imps[signature].instance = asInstance
+         imps[signature].fromBehavior = fromImp
          return
       }
       const implementation = does(refs)
       implementation.fromInstance = this
+      implementation.fromBehavior = fromImp
+      implementation.instance = asInstance
+      implementation.uses = uses
       // could do something with return type information here?
       imps[signature] = implementation
-   }
-
-   _correctPartialSelfRefs(name, imps) {
-      for (const aSignature in imps) {
-         if (!(imps[aSignature].deferred)) continue
-         const deferral = imps[aSignature]
-         const part_self_references = deferral.psr
-         const corrected_self_references = []
-         const remaining_self_references = []
-         const refs = deferral.builtRefs
-         for (const neededSig of part_self_references) {
-            // Have to find a match for neededSig among the other signatures
-            // of this function. That's a job for typed-function, but we will
-            // try here:
-            if (neededSig in imps) { // the easy case
-               corrected_self_references.push(neededSig)
-               remaining_self_references.push(neededSig)
-               continue
-            }
-            // No exact match, try to get one that matches with
-            // subtypes since the whole conversion thing in typed-function
-            // is too complicated to reproduce
-            let foundSig = this._findSubtypeImpl(name, imps, neededSig)
-            if (foundSig) {
-               corrected_self_references.push(foundSig)
-               remaining_self_references.push(neededSig)
-            } else {
-               // Maybe it's a template instance we don't yet have
-               foundSig = this._findSubtypeImpl(
-                  name, this._imps[name], neededSig)
-               if (foundSig) {
-                  const match = this._pocoFindSignature(name, neededSig)
-                  const neededTemplate = match.fn._pocoSignature
-                  const neededInstance = whichSigInstance(
-                     neededSig, neededTemplate)
-                  const neededImplementation =
-                     this._instantiateTemplateImplementation(
-                        name, neededTemplate, neededInstance)
-                  if (!neededImplementation) {
-                     refs[`self(${neededSig})`] = match.implementation
-                  } else {
-                     if (typeof neededImplementation === 'function') {
-                        refs[`self(${neededSig})`] = neededImplementation
-                     } else {
-                        corrected_self_references.push(neededSig)
-                        remaining_self_references.push(neededSig)
-                     }
-                  }
-               } else {
-                  throw new Error(
-                     'Implement inexact self-reference in typed-function for '
-                        + `${name}(${neededSig})`)
-               }
-            }
-         }
-         const does = deferral.sigDoes
-         if (remaining_self_references.length > 0) {
-            imps[aSignature] = this._typed.referTo(
-               ...corrected_self_references, (...impls) => {
-                  for (let i = 0; i < remaining_self_references.length; ++i) {
-                     refs[`self(${remaining_self_references[i]})`] = impls[i]
-                  }
-                  const implementation = does(refs)
-                  // What will we do with the return type info in here?
-                  return implementation
-               }
-            )
-         } else {
-            imps[aSignature] = does(refs)
-         }
-         imps[aSignature]._pocoSignature = deferral._pocoSignature
-         imps[aSignature]._pocoInstance = deferral._pocoInstance
-         imps[aSignature].fromInstance = deferral.fromInstance
-      }
    }
 
    /* This function analyzes the template and makes sure the
@@ -1542,7 +1518,8 @@ export default class PocomathInstance {
       return wantsType
    })
 
-   _findSubtypeImpl(name, imps, neededSig) {
+   _findSubtypeImpl(name, imps, neededSig, raw = false) {
+      const detemplate = !raw
       if (neededSig in imps) return neededSig
       let foundSig = false
       const typeList = typeListOfSignature(neededSig)
@@ -1550,21 +1527,21 @@ export default class PocomathInstance {
          const otherTypeList = typeListOfSignature(otherSig)
          if (typeList.length !== otherTypeList.length) continue
          let allMatch = true
-         let paramBound = 'any'
+         let paramBound = UniversalType
          for (let k = 0; k < typeList.length; ++k) {
             let myType = typeList[k]
             let otherType = otherTypeList[k]
             if (otherType === theTemplateParam) {
-               otherTypeList[k] = paramBound
+               if (detemplate) otherTypeList[k] = paramBound
                otherType = paramBound
             }
             if (otherType === restTemplateParam) {
-               otherTypeList[k] = `...${paramBound}`
+               if (detemplate) otherTypeList[k] = `...${paramBound}`
                otherType = paramBound
             }
             const adjustedOtherType = otherType.replaceAll(templateCall, '')
             if (adjustedOtherType !== otherType) {
-               otherTypeList[k] = adjustedOtherType
+               if (detemplate) otherTypeList[k] = adjustedOtherType
                otherType = adjustedOtherType
             }
             if (myType.slice(0,3) === '...') myType = myType.slice(3)
@@ -1573,10 +1550,13 @@ export default class PocomathInstance {
             if (otherBound) {
                paramBound = otherBound[2]
                otherType = paramBound
-               otherTypeList[k] = otherBound[1].replaceAll(
-                  theTemplateParam, paramBound)
+               if (detemplate) {
+                  otherTypeList[k] = otherBound[1].replaceAll(
+                     theTemplateParam, paramBound)
+               }
             }
             if (otherType === 'any') continue
+            if (otherType === UniversalType) continue
             if (myType === otherType) continue
             if (otherType in this.Templates) {
                const [myBase] = splitTemplate(myType)
@@ -1584,7 +1564,7 @@ export default class PocomathInstance {
                if (this.instantiateTemplate(otherType, myType)) {
                   let dummy
                   dummy = this[name] // for side effects
-                  return this._findSubtypeImpl(name, this._imps[name], neededSig)
+                  return this._findSubtypeImpl(name, this._imps[name], neededSig, raw)
                }
             }
             if (!(otherType in this.Types)) {
@@ -1608,6 +1588,7 @@ export default class PocomathInstance {
          typedFunction = this[name]
       }
       const haveTF = this._typed.isTypedFunction(typedFunction)
+         && !(typedFunction.isMeta)
       if (haveTF) {
          // First try a direct match
          let result
@@ -1622,6 +1603,10 @@ export default class PocomathInstance {
               of typedFunction._typedFunctionData.signatureMap) {
             let allMatched = true
             const implTypes = typeListOfSignature(implSig)
+            if (implTypes.length > wantTypes.length) {
+               // Not enough arguments for that implementation
+               continue
+            }
             for (let i = 0; i < wantTypes.length; ++i) {
                const implIndex = Math.min(i, implTypes.length - 1)
                let implType = implTypes[implIndex]
@@ -1646,7 +1631,7 @@ export default class PocomathInstance {
          }
       }
       if (!(this._imps[name])) return undefined
-      const foundsig = this._findSubtypeImpl(name, this._imps[name], sig)
+      const foundsig = this._findSubtypeImpl(name, this._imps[name], sig, 'raw')
       if (foundsig) {
          if (haveTF) {
             try {
@@ -1654,19 +1639,74 @@ export default class PocomathInstance {
             } catch {
             }
          }
-         try {
-            return this._metaTyped.findSignature(this._meta[name], foundsig)
-         } catch {
+         const instantiationMatcher =
+            '^'
+            + substituteInSignature(foundsig, theTemplateParam, '(.*)')
+               .replaceAll(UniversalType, '(.*)')
+            + '$'
+         const instanceMatch = sig.match(instantiationMatcher)
+         let possibleInstantiator = false
+         if (instanceMatch) {
+            possibleInstantiator = instanceMatch[1]
+            for (let i = 2; i < instanceMatch.length; ++i) {
+               if (possibleInstantiator !== instanceMatch[i]) {
+                  possibleInstantiator = false
+                  break
+               }
+            }
+         }
+         if (possibleInstantiator) {
+            const behavior = this._imps[name][foundsig]
+            let newInstance
+            if (behavior) {
+               if (!(possibleInstantiator in behavior.hasInstantiations)) {
+                  newInstance = this._instantiateTemplateImplementation(
+                     name, foundsig, possibleInstantiator)
+               } else {
+                  // OK, so we actually have the instantiation. Let's get it
+                  newInstance = this._TFimps[name][sig]
+               }
+               // But we may not have taken advantage of conversions
+               this._invalidate(name)
+               const tryAgain = this[name]
+               let betterInstance
+               if (this._typed.isTypedFunction(tryAgain)) {
+                  betterInstance = this._typed.findSignature(tryAgain, sig)
+               }
+               if (betterInstance) {
+                  newInstance = betterInstance
+               } else {
+                  newInstance = {
+                     fn: newInstance,
+                     implementation: newInstance
+                  }
+               }
+               if (newInstance) return newInstance
+            }
+         }
+         const catchallSig = this._findSubtypeImpl(name, this._imps[name], sig)
+         if (catchallSig !== foundsig) {
+            try {
+               return this._metaTyped.findSignature(
+                  this._meta[name], catchallSig)
+            } catch {
+            }
          }
          // We have an implementation but not a typed function. Do the best
          // we can:
-         const foundImpl = this._imps[name][foundsig]
+         const restoredSig = foundsig.replaceAll('ground', theTemplateParam)
+         const foundImpl = this._imps[name][restoredSig]
          const needs = {}
          for (const dep of foundImpl.uses) {
-            const [base, sig] = dep.split('()')
-            needs[dep] = this.resolve(base, sig)
+            const [base, sig] = dep.split(/[()]/)
+            if (sig) {
+               needs[dep] = this.resolve(base, sig)
+            } else {
+               needs[dep] = this[dep]
+            }
          }
          const pseudoImpl = foundImpl.does(needs)
+         pseudoImpl.fromInstance = this
          return {fn: pseudoImpl, implementation: pseudoImpl}
       }
       // Hmm, no luck. Make sure bundle is up-to-date and retry:

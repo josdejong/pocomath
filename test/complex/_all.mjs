@@ -45,6 +45,11 @@ describe('complex', () => {
       assert.ok(!(math.equal(math.complex(45n, 3n), 45n)))
    })
 
+   it('tests for reality', () => {
+      assert.ok(math.isReal(math.complex(3, 0)))
+      assert.ok(!(math.isReal(math.complex(3, 2))))
+   })
+
    it('computes gcd', () => {
       assert.deepStrictEqual(
          math.gcd(math.complex(53n, 56n), math.complex(47n, -13n)),

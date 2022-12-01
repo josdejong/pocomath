@@ -6,5 +6,5 @@ export {Tuple} from './Types/Tuple.mjs'
  * are convertible to the same type.
  */
 export const tuple = {
-    '...T': ({T}) => Returns(`Tuple<${T}>`, args => ({elts: args}))
+   '...T': ({T}) => Returns(`Tuple<${T}>`, args => ({elts: args}))
 }

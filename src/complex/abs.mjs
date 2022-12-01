@@ -3,7 +3,6 @@ export * from './Types/Complex.mjs'
 
 export const abs = {
    'Complex<T>': ({
-      T,
       sqrt, // Unfortunately no notation yet for the needed signature
       'absquare(T)': baseabsq,
       'absquare(Complex<T>)': absq
