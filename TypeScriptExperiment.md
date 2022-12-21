@@ -2,7 +2,7 @@
 
 Explanation:
 
-1. The code doesn't actually work: teh magic `infer` is not implemented. Making `infer` work requires a TypeScript plugin that can turn TS into the pocomath syntax (string). 
+1. The code doesn't actually work: the magic `infer` is not implemented. Making `infer` work requires a TypeScript plugin that can turn TS into the pocomath syntax (string). 
 2. Have a look at the `*.ts` files, which have been put alongside the original `*.mjs` files
 3. This approach does not need any advanced TypeScript techniques: it only needs basic types with generics. No magic. No need for `Dispatcher` and `Dependency<...>` techniques. This will play 100% nice when integrating with other math libraries that use TypeScript. A new developer will directly understand how to implement a new function for mathjs.
 4. The solution is DRY I think: no duplicate type definitions or something like that.
@@ -25,5 +25,5 @@ Thoughts:
     feels like a neeless object, and if you want to describe two signatures, you have a naming confict. How to go about that?
 
 3. I'm not entirly sure yet what is handy for defining multiple signatures, like in  `complex/complex.ts`. How to define them, and how to define their TypeScript interface?
-4. We should come up with a good naming convention to deal with conflicting type names for the data type `Complex` vs the function `complex: (re: T, im: T) => Complex<T>`.
+4. We should come up with a good naming convention to deal with conflicting type names for the data type `Complex` vs the function `complex: (re: T, im: T) => Complex<T>`. Maybe we should name all function types with an `*Fn` suffix or so, like `AddFn`, `MultiplyFn`, `ComplexFn`, etc.
 
