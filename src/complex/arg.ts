@@ -1,6 +1,13 @@
 import { Complex } from './interfaces'
 
-export type ArgComplexNumber = (z: Complex<number>) => number
+// we should move Arg and ArgComplex into /interfaces/ 
+export type Arg<T, U> = (z: T) => U
+export type ArgComplex<U> = Arg<Complex<U>, U>
+
+// now, we can write out ArgComplexNumber and ArgComplexBigint. 
+// this is probably redundant though
+export type ArgComplexNumber = ArgComplex<number>
+export type ArgComplexBigInt = ArgComplex<bigint>
 
 /* arg is the "argument" or angle theta of z in its form r cis theta */
 export const arg = {
