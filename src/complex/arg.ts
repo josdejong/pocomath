@@ -13,3 +13,6 @@ export type ArgComplexBigInt = ArgComplex<bigint>
 export const arg = {
    'infer': (): ArgComplexNumber => z => Math.atan2(z.im, z.re)
 }
+
+// Experiment: drop the {infer} wrapper object and write without optional dependencies:
+export const arg_2: ArgComplexNumber = z => Math.atan2(z.im, z.re)
