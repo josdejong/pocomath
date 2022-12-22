@@ -3,7 +3,7 @@ import { Complex } from './interfaces.js'
 
 export type ComplexFn1<T> = (x: T) => Complex<T>
 export type ComplexFn2<T> = (re: T, im: T) => Complex<T>
-export type ComplexFn<T> = ComplexFn1<T> | ComplexFn2<T>
+export type ComplexFn<T> = ComplexFn1<T> & ComplexFn2<T>
 
 export const complex = {
    'infer:1': function <T>({ zero }: {
