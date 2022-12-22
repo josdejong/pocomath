@@ -6,6 +6,6 @@ export const abs = {
       negate: Negate<T>,
       zero: Zero<T>
    }): Abs<T> {
-      return t => (smaller(t, zero()) ? negate(t) : t)
+      return t => (smaller(t, zero(t)) ? negate(t) : t)
    }
 }

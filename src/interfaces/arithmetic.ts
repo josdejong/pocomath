@@ -13,4 +13,4 @@ export type Sum<T> = (...values: T[]) => T  // TODO: rename to Add<T>, replacing
 export type Sqrt<T> = (x: T, y: T) => T
 export type Square<T> = (x: T) => T
 export type Quotient<T> = (n: T, d: T) => T
-export type Zero<T> = () => T
+export type Zero<T> = (x: T) => T

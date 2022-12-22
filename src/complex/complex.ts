@@ -9,7 +9,7 @@ export const complex = {
    'infer:1': function <T>({ zero }: {
       zero: Zero<T>
    }): ComplexFn1<T> {
-      return (x) => ({ re: x, im: zero() })
+      return (x) => ({ re: x, im: zero(x) })
    },
    'infer:2': function <T>(): ComplexFn2<T> {
       return (re, im) => ({ re, im })

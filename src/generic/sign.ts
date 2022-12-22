@@ -5,6 +5,6 @@ export const sign = {
       compare: Compare<T>,
       zero: Zero<T>
    }): Sign<T> {
-      return x => compare(x, zero())
+      return x => compare(x, zero(x))
    }
 }
